@@ -23,6 +23,21 @@ export function IntegritySettings({ config, setNewConfig }: IntegritySettingsPro
     const isRunButtonEnabled = connected && !isRunning;
     const runButtonVariant = isRunButtonEnabled ? 'primary' : 'secondary';
     const runButtonLabel = isRunning ? "⌛ Checking..." : '🔍 Check Media Integrity Now';
+    
+    // Check if any arr instances are configured
+    const hasArrInstances = () => {
+        for (let i = 0; i < 10; i++) {
+            const radarrUrl = config[`radarr.${i}.url`];
+            const radarrApiKey = config[`radarr.${i}.api_key`];
+            const sonarrUrl = config[`sonarr.${i}.url`];
+            const sonarrApiKey = config[`sonarr.${i}.api_key`];
+            
+            if ((radarrUrl && radarrApiKey) || (sonarrUrl && sonarrApiKey)) {
+                return true;
+            }
+        }
+        return false;
+    };
 
     // Parse progress for display
     let progressDetails = null;
@@ -164,11 +179,29 @@ export function IntegritySettings({ config, setNewConfig }: IntegritySettingsPro
                             <option value="log">Log Only</option>
                             <option value="quarantine">Move to Quarantine</option>
                             <option value="delete">Delete Files</option>
+                            <option value="delete_via_arr">Delete via Radarr/Sonarr</option>
                         </Form.Select>
                         <Form.Text id="integrity-action-help" muted>
-                            What to do when corrupt files are detected. "Log Only" is safest, "Quarantine" moves files to a quarantine folder, "Delete" permanently removes corrupt files.
+                            What to do when corrupt files are detected. "Log Only" is safest, "Quarantine" moves files to a quarantine folder, "Delete" permanently removes corrupt files, "Delete via Radarr/Sonarr" removes files through configured Radarr/Sonarr instances (configure in Radarr/Sonarr tab).
                         </Form.Text>
                     </Form.Group>
+                </>
+            )}
+
+            {config["integrity.corrupt_file_action"] === "delete_via_arr" && (
+                <>
+                    <hr />
+                    {!hasArrInstances() ? (
+                        <Alert variant="warning">
+                            <strong>Radarr/Sonarr Integration Required:</strong> You have selected "Delete via Radarr/Sonarr" but need to configure your instances first. 
+                            Please go to the <strong>Radarr/Sonarr</strong> tab in Advanced Settings to set up your instances.
+                        </Alert>
+                    ) : (
+                        <Alert variant="success">
+                            <strong>Radarr/Sonarr Integration Ready:</strong> Your configured instances will be used to delete corrupt files. 
+                            You can manage your instances in the <strong>Radarr/Sonarr</strong> tab in Advanced Settings.
+                        </Alert>
+                    )}
                 </>
             )}
 

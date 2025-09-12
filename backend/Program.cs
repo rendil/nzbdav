@@ -71,6 +71,7 @@ class Program
             .AddSingleton(websocketManager)
             .AddSingleton<UsenetStreamingClient>()
             .AddSingleton<QueueManager>()
+            .AddSingleton<ArrManager>()
             .AddSingleton<MediaIntegrityService>()
             .AddScoped<DavDatabaseContext>()
             .AddScoped<DavDatabaseClient>()

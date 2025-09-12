@@ -167,6 +167,11 @@ public class ConfigManager
         return GetConfigValue("integrity.corrupt_file_action") ?? "log";
     }
 
+    public bool IsArrIntegrationEnabled()
+    {
+        return GetCorruptFileAction() == "delete_via_arr";
+    }
+
     public class ConfigEventArgs : EventArgs
     {
         public Dictionary<string, string> ChangedConfig { get; set; } = new();

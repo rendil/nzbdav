@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
+using NzbWebDAV.Clients;
 using NzbWebDAV.Config;
 using NzbWebDAV.Database;
 using NzbWebDAV.Database.Models;
@@ -14,6 +15,7 @@ public class MediaIntegrityService : IDisposable
 {
     private readonly ConfigManager _configManager;
     private readonly WebsocketManager _websocketManager;
+    private readonly ArrManager _arrManager;
     private readonly CancellationTokenSource _cancellationTokenSource;
     private readonly SemaphoreSlim _semaphore = new(1, 1);
     
@@ -22,11 +24,13 @@ public class MediaIntegrityService : IDisposable
 
     public MediaIntegrityService(
         ConfigManager configManager,
-        WebsocketManager websocketManager
+        WebsocketManager websocketManager,
+        ArrManager arrManager
     )
     {
         _configManager = configManager;
         _websocketManager = websocketManager;
+        _arrManager = arrManager;
         _cancellationTokenSource = CancellationTokenSource
             .CreateLinkedTokenSource(SigtermUtil.GetCancellationToken());
         
@@ -105,47 +109,73 @@ public class MediaIntegrityService : IDisposable
             Log.Information("Starting media integrity check");
             _ = _websocketManager.SendMessage(WebsocketTopic.IntegrityCheckProgress, "starting");
 
+            // Check if library directory is configured (required for arr integration)
+            var libraryDir = _configManager.GetLibraryDir();
+            if (string.IsNullOrEmpty(libraryDir) && _configManager.GetCorruptFileAction() == "delete_via_arr")
+            {
+                var errorMsg = "Library directory must be configured for Radarr/Sonarr integration";
+                Log.Error(errorMsg);
+                _ = _websocketManager.SendMessage(WebsocketTopic.IntegrityCheckProgress, $"failed: {errorMsg}");
+                return;
+            }
+
             await using var dbContext = new DavDatabaseContext();
             var dbClient = new DavDatabaseClient(dbContext);
 
-            // Get all media files that need checking
-            var mediaFiles = await GetMediaFilesToCheckAsync(dbClient, ct);
+            // Get media files to check based on configuration
+            List<string> filePaths;
+            if (!string.IsNullOrEmpty(libraryDir) && Directory.Exists(libraryDir))
+            {
+                // Use library directory for arr integration
+                filePaths = await GetLibraryFilesToCheckAsync(libraryDir, ct);
+                Log.Information("Checking files in library directory: {LibraryDir}", libraryDir);
+            }
+            else
+            {
+                // Fallback to internal files for non-arr usage
+                var davItems = await GetDavItemsToCheckAsync(dbClient, ct);
+                filePaths = davItems.Select(item => 
+                    DatabaseStoreSymlinkFile.GetTargetPath(item, _configManager.GetRcloneMountDir())).ToList();
+                Log.Information("Checking internal nzbdav files");
+            }
             
-            if (mediaFiles.Count == 0)
+            if (filePaths.Count == 0)
             {
                 Log.Information("No media files found to check");
                 _ = _websocketManager.SendMessage(WebsocketTopic.IntegrityCheckProgress, "complete: 0/0");
                 return;
             }
 
-            var totalFiles = mediaFiles.Count;
+            var totalFiles = filePaths.Count;
             var processedFiles = 0;
             var corruptFiles = 0;
 
             var debounce = DebounceUtil.CreateDebounce(TimeSpan.FromMilliseconds(500));
 
-            foreach (var davItem in mediaFiles)
+            foreach (var filePath in filePaths)
             {
                 ct.ThrowIfCancellationRequested();
 
                 try
                 {
-                    var filePath = DatabaseStoreSymlinkFile.GetTargetPath(davItem, _configManager.GetRcloneMountDir());
                     var isCorrupt = await CheckFileIntegrityAsync(filePath, ct);
                     
                     if (isCorrupt)
                     {
                         corruptFiles++;
                         Log.Warning("Corrupt media file detected: {FilePath}", filePath);
-                        await HandleCorruptFileAsync(dbClient, davItem, filePath, ct);
+                        await HandleCorruptFileAsync(dbClient, null, filePath, ct);
                     }
 
-                    // Update integrity check timestamp
-                    await UpdateLastIntegrityCheckAsync(dbClient, davItem, !isCorrupt, ct);
+                    // Update integrity check timestamp for library files
+                    if (!string.IsNullOrEmpty(libraryDir))
+                    {
+                        await UpdateLastIntegrityCheckForLibraryFileAsync(dbClient, filePath, !isCorrupt, ct);
+                    }
                 }
                 catch (Exception ex)
                 {
-                    Log.Error(ex, "Error checking integrity of file: {ItemName}", davItem.Name);
+                    Log.Error(ex, "Error checking integrity of file: {FilePath}", filePath);
                 }
 
                 processedFiles++;
@@ -169,7 +199,7 @@ public class MediaIntegrityService : IDisposable
         }
     }
 
-    private async Task<List<DavItem>> GetMediaFilesToCheckAsync(DavDatabaseClient dbClient, CancellationToken ct)
+    private async Task<List<DavItem>> GetDavItemsToCheckAsync(DavDatabaseClient dbClient, CancellationToken ct)
     {
         var cutoffTime = DateTime.Now.AddDays(-_configManager.GetIntegrityCheckIntervalDays());
         
@@ -191,6 +221,104 @@ public class MediaIntegrityService : IDisposable
         }
 
         return await query.Take(_configManager.GetMaxFilesToCheckPerRun()).ToListAsync(ct);
+    }
+
+    private async Task<List<string>> GetLibraryFilesToCheckAsync(string libraryDir, CancellationToken ct)
+    {
+        var filePaths = new List<string>();
+        var cutoffTime = DateTime.Now.AddDays(-_configManager.GetIntegrityCheckIntervalDays());
+        
+        try
+        {
+            // Get all media files in library directory recursively
+            var allFiles = Directory.EnumerateFiles(libraryDir, "*", SearchOption.AllDirectories)
+                .Where(file => IsMediaFile(Path.GetExtension(file).ToLowerInvariant()))
+                .ToList();
+
+            Log.Information("Found {FileCount} media files in library directory", allFiles.Count);
+
+            // Filter out recently checked files
+            foreach (var filePath in allFiles)
+            {
+                ct.ThrowIfCancellationRequested();
+                
+                var fileHash = GetFilePathHash(filePath);
+                var lastCheckConfig = $"integrity.last_check.library.{fileHash}";
+                
+                using var dbContext = new DavDatabaseContext();
+                var lastCheckValue = await dbContext.ConfigItems
+                    .Where(c => c.ConfigName == lastCheckConfig)
+                    .Select(c => c.ConfigValue)
+                    .FirstOrDefaultAsync(ct);
+
+                if (lastCheckValue == null || !DateTime.TryParse(lastCheckValue, out var lastCheck) || lastCheck <= cutoffTime)
+                {
+                    filePaths.Add(filePath);
+                    
+                    // Limit the number of files per run
+                    if (filePaths.Count >= _configManager.GetMaxFilesToCheckPerRun())
+                        break;
+                }
+            }
+
+            Log.Information("Selected {SelectedCount} files for integrity check", filePaths.Count);
+            return filePaths;
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Error scanning library directory: {LibraryDir}", libraryDir);
+            return filePaths;
+        }
+    }
+
+    private static string GetFilePathHash(string filePath)
+    {
+        // Create a simple hash of the file path for unique identification
+        return BitConverter.ToString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(filePath))).Replace("-", "")[..16];
+    }
+
+    private async Task UpdateLastIntegrityCheckForLibraryFileAsync(DavDatabaseClient dbClient, string filePath, bool isValid, CancellationToken ct)
+    {
+        var fileHash = GetFilePathHash(filePath);
+        var configName = $"integrity.last_check.library.{fileHash}";
+        var configValue = DateTime.Now.ToString("O");
+        
+        var existingConfig = await dbClient.Ctx.ConfigItems
+            .FirstOrDefaultAsync(c => c.ConfigName == configName, ct);
+            
+        if (existingConfig != null)
+        {
+            existingConfig.ConfigValue = configValue;
+        }
+        else
+        {
+            dbClient.Ctx.ConfigItems.Add(new ConfigItem
+            {
+                ConfigName = configName,
+                ConfigValue = configValue
+            });
+        }
+
+        // Also store validation result
+        var statusConfigName = $"integrity.status.library.{fileHash}";
+        var statusConfig = await dbClient.Ctx.ConfigItems
+            .FirstOrDefaultAsync(c => c.ConfigName == statusConfigName, ct);
+            
+        if (statusConfig != null)
+        {
+            statusConfig.ConfigValue = isValid ? "valid" : "corrupt";
+        }
+        else
+        {
+            dbClient.Ctx.ConfigItems.Add(new ConfigItem
+            {
+                ConfigName = statusConfigName,
+                ConfigValue = isValid ? "valid" : "corrupt"
+            });
+        }
+
+        await dbClient.Ctx.SaveChangesAsync(ct);
     }
 
     private async Task<bool> CheckFileIntegrityAsync(string filePath, CancellationToken ct)
@@ -267,7 +395,7 @@ public class MediaIntegrityService : IDisposable
         return mediaExtensions.Contains(extension);
     }
 
-    private async Task HandleCorruptFileAsync(DavDatabaseClient dbClient, DavItem davItem, string filePath, CancellationToken ct)
+    private async Task HandleCorruptFileAsync(DavDatabaseClient dbClient, DavItem? davItem, string filePath, CancellationToken ct)
     {
         var action = _configManager.GetCorruptFileAction();
         
@@ -282,13 +410,56 @@ public class MediaIntegrityService : IDisposable
                         Log.Information("Deleted corrupt file: {FilePath}", filePath);
                     }
                     
-                    // Remove from database
-                    dbClient.Ctx.Items.Remove(davItem);
-                    await dbClient.Ctx.SaveChangesAsync(ct);
+                    // Remove from database if this is a DavItem
+                    if (davItem != null)
+                    {
+                        dbClient.Ctx.Items.Remove(davItem);
+                        await dbClient.Ctx.SaveChangesAsync(ct);
+                    }
                 }
                 catch (Exception ex)
                 {
                     Log.Error(ex, "Error deleting corrupt file: {FilePath}", filePath);
+                }
+                break;
+                
+            case "delete_via_arr":
+                try
+                {
+                    Log.Information("Attempting to delete corrupt file via Radarr/Sonarr: {FilePath}", filePath);
+                    var success = await _arrManager.DeleteFileFromArrAsync(filePath, ct);
+                    
+                    if (success)
+                    {
+                        Log.Information("Successfully deleted corrupt file via Radarr/Sonarr: {FilePath}", filePath);
+                        // Remove from database since the file was deleted via arr (if this is a DavItem)
+                        if (davItem != null)
+                        {
+                            dbClient.Ctx.Items.Remove(davItem);
+                            await dbClient.Ctx.SaveChangesAsync(ct);
+                        }
+                    }
+                    else
+                    {
+                        Log.Warning("Failed to delete corrupt file via Radarr/Sonarr, falling back to direct deletion: {FilePath}", filePath);
+                        // Fallback to direct deletion
+                        if (File.Exists(filePath))
+                        {
+                            File.Delete(filePath);
+                            Log.Information("Deleted corrupt file directly as fallback: {FilePath}", filePath);
+                        }
+                        
+                        // Remove from database (if this is a DavItem)
+                        if (davItem != null)
+                        {
+                            dbClient.Ctx.Items.Remove(davItem);
+                            await dbClient.Ctx.SaveChangesAsync(ct);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Error(ex, "Error deleting corrupt file via Radarr/Sonarr: {FilePath}", filePath);
                 }
                 break;
                 

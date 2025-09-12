@@ -6,5 +6,6 @@ declare const styles: {
   readonly run: string;
   readonly "task-progress": string;
   readonly error: string;
+  readonly arrSection: string;
 };
 export = styles;

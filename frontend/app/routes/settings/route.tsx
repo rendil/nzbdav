@@ -8,6 +8,7 @@ import { isSabnzbdSettingsUpdated, isSabnzbdSettingsValid, SabnzbdSettings } fro
 import { isWebdavSettingsUpdated, isWebdavSettingsValid, WebdavSettings } from "./webdav/webdav";
 import { isLibrarySettingsUpdated, LibrarySettings } from "./library/library";
 import { isIntegritySettingsUpdated, IntegritySettings } from "./integrity/integrity";
+import { isArrSettingsUpdated, ArrSettings } from "./arr/arr";
 import { Maintenance } from "./maintenance/maintenance";
 
 const defaultConfig = {
@@ -35,14 +36,35 @@ const defaultConfig = {
     "integrity.corrupt_file_action": "log",
 }
 
-const advancedTabs = ["library", "integrity", "maintenance"];
+const advancedTabs = ["library", "integrity", "arr", "maintenance"];
 
 export async function loader({ request }: Route.LoaderArgs) {
+    // Build config keys including arr instances
+    const arrKeys: string[] = [];
+    for (let i = 0; i < 10; i++) {
+        arrKeys.push(
+            `radarr.${i}.name`,
+            `radarr.${i}.url`,
+            `radarr.${i}.api_key`,
+            `sonarr.${i}.name`,
+            `sonarr.${i}.url`,
+            `sonarr.${i}.api_key`
+        );
+    }
+    
+    const allConfigKeys = [...Object.keys(defaultConfig), ...arrKeys];
+    
     // fetch the config items
-    var configItems = await backendClient.getConfig(Object.keys(defaultConfig));
+    var configItems = await backendClient.getConfig(allConfigKeys);
 
     // transform to a map
-    const config: Record<string, string> = defaultConfig;
+    const config: Record<string, string> = { ...defaultConfig };
+    
+    // Initialize arr keys with empty strings
+    arrKeys.forEach(key => {
+        config[key] = "";
+    });
+    
     for (const item of configItems) {
         config[item.configName] = item.configValue;
     }
@@ -75,13 +97,15 @@ function Body(props: BodyProps) {
     const isWebdavUpdated = isWebdavSettingsUpdated(config, newConfig);
     const isLibraryUpdated = isLibrarySettingsUpdated(config, newConfig);
     const isIntegrityUpdated = isIntegritySettingsUpdated(config, newConfig);
-    const isUpdated = iseUsenetUpdated || isSabnzbdUpdated || isWebdavUpdated || isLibraryUpdated || isIntegrityUpdated;
+    const isArrUpdated = isArrSettingsUpdated(config, newConfig);
+    const isUpdated = iseUsenetUpdated || isSabnzbdUpdated || isWebdavUpdated || isLibraryUpdated || isIntegrityUpdated || isArrUpdated;
 
     const usenetTitle = iseUsenetUpdated ? "Usenet ✏️" : "Usenet";
     const sabnzbdTitle = isSabnzbdUpdated ? "SABnzbd ✏️" : "SABnzbd";
     const webdavTitle = isWebdavUpdated ? "WebDAV ✏️" : "WebDAV";
     const libraryTitle = isLibraryUpdated ? "Library ✏️" : "Library";
     const integrityTitle = isIntegrityUpdated ? "Integrity ✏️" : "Integrity";
+    const arrTitle = isArrUpdated ? "Radarr/Sonarr ✏️" : "Radarr/Sonarr";
 
     const saveButtonLabel = isSaving ? "Saving..."
         : !isUpdated && isSaved ? "Saved ✅"
@@ -155,6 +179,11 @@ function Body(props: BodyProps) {
                 {showAdvanced &&
                     <Tab eventKey="integrity" title={integrityTitle}>
                         <IntegritySettings config={newConfig} setNewConfig={setNewConfig} />
+                    </Tab>
+                }
+                {showAdvanced &&
+                    <Tab eventKey="arr" title={arrTitle}>
+                        <ArrSettings config={newConfig} setNewConfig={setNewConfig} />
                     </Tab>
                 }
                 {showAdvanced &&
