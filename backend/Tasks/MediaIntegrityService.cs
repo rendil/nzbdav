@@ -379,7 +379,19 @@ public class MediaIntegrityService : IDisposable
         catch (Exception ex)
         {
             Log.Error(ex, "Error running ffprobe on {FilePath}", filePath);
-            return false; // Can't determine, assume file is ok
+            
+            // If ffprobe is not found or can't be started, this is a configuration issue
+            // We should treat this as a problem that needs attention
+            if (ex is System.ComponentModel.Win32Exception win32Ex && win32Ex.NativeErrorCode == 2)
+            {
+                Log.Error("ffprobe not found - please ensure FFmpeg is installed. File integrity cannot be verified: {FilePath}", filePath);
+                // Return true (corrupt) to indicate there's an issue that needs attention
+                // This prevents silent failures where users think files are checked but they're not
+                return true;
+            }
+            
+            // For other errors, assume file is ok but log the issue
+            return false;
         }
     }
 
