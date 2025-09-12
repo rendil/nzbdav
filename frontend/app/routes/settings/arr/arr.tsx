@@ -93,15 +93,15 @@ export function ArrSettings({ config, setNewConfig }: ArrSettingsProps) {
             inst.id === id ? { ...inst, [field]: value } : inst
         ));
         
-        // Update config
+        // Update config - use current newConfig state instead of original config
         const instance = instances.find(inst => inst.id === id);
         if (instance) {
             const index = parseInt(id.split('-')[1]);
             const configKey = `${instance.type}.${index}.${field === 'apiKey' ? 'api_key' : field}`;
-            setNewConfig({
-                ...config,
+            setNewConfig(prevConfig => ({
+                ...prevConfig,
                 [configKey]: value
-            });
+            }));
         }
     };
 
@@ -109,14 +109,17 @@ export function ArrSettings({ config, setNewConfig }: ArrSettingsProps) {
         const instance = instances.find(inst => inst.id === id);
         if (instance) {
             const index = parseInt(id.split('-')[1]);
-            const updatedConfig = { ...config };
             
-            // Clear config values
-            delete updatedConfig[`${instance.type}.${index}.name`];
-            delete updatedConfig[`${instance.type}.${index}.url`];
-            delete updatedConfig[`${instance.type}.${index}.api_key`];
-            
-            setNewConfig(updatedConfig);
+            setNewConfig(prevConfig => {
+                const updatedConfig = { ...prevConfig };
+                
+                // Clear config values
+                delete updatedConfig[`${instance.type}.${index}.name`];
+                delete updatedConfig[`${instance.type}.${index}.url`];
+                delete updatedConfig[`${instance.type}.${index}.api_key`];
+                
+                return updatedConfig;
+            });
         }
         
         setInstances(instances.filter(inst => inst.id !== id));

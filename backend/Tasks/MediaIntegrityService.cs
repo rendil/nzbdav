@@ -453,19 +453,30 @@ public class MediaIntegrityService : IDisposable
                     }
                     else
                     {
-                        Log.Warning("Failed to delete corrupt file via Radarr/Sonarr, falling back to direct deletion: {FilePath}", filePath);
-                        // Fallback to direct deletion
-                        if (File.Exists(filePath))
-                        {
-                            File.Delete(filePath);
-                            Log.Information("Deleted corrupt file directly as fallback: {FilePath}", filePath);
-                        }
+                        Log.Warning("Failed to delete corrupt file via Radarr/Sonarr: {FilePath}", filePath);
                         
-                        // Remove from database (if this is a DavItem)
-                        if (davItem != null)
+                        // Check if direct deletion fallback is enabled
+                        if (_configManager.IsDirectDeletionFallbackEnabled())
                         {
-                            dbClient.Ctx.Items.Remove(davItem);
-                            await dbClient.Ctx.SaveChangesAsync(ct);
+                            Log.Information("Direct deletion fallback is enabled, deleting file directly: {FilePath}", filePath);
+                            // Fallback to direct deletion
+                            if (File.Exists(filePath))
+                            {
+                                File.Delete(filePath);
+                                Log.Information("Deleted corrupt file directly as fallback: {FilePath}", filePath);
+                            }
+                            
+                            // Remove from database (if this is a DavItem)
+                            if (davItem != null)
+                            {
+                                dbClient.Ctx.Items.Remove(davItem);
+                                await dbClient.Ctx.SaveChangesAsync(ct);
+                            }
+                        }
+                        else
+                        {
+                            Log.Information("Direct deletion fallback is disabled, leaving corrupt file in place: {FilePath}", filePath);
+                            Log.Warning("Corrupt file was not deleted by Radarr/Sonarr and direct deletion fallback is disabled. File remains: {FilePath}", filePath);
                         }
                     }
                 }

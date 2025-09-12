@@ -172,6 +172,13 @@ public class ConfigManager
         return GetCorruptFileAction() == "delete_via_arr";
     }
 
+    public bool IsDirectDeletionFallbackEnabled()
+    {
+        if (bool.TryParse(GetConfigValue("integrity.direct_deletion_fallback"), out var enabled))
+            return enabled;
+        return false; // Default to disabled for safety
+    }
+
     public class ConfigEventArgs : EventArgs
     {
         public Dictionary<string, string> ChangedConfig { get; set; } = new();

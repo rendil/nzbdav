@@ -34,6 +34,7 @@ const defaultConfig = {
     "integrity.interval_days": "7",
     "integrity.max_files_per_run": "100",
     "integrity.corrupt_file_action": "log",
+    "integrity.direct_deletion_fallback": "false",
 }
 
 const advancedTabs = ["library", "integrity", "arr", "maintenance"];

@@ -202,6 +202,20 @@ export function IntegritySettings({ config, setNewConfig }: IntegritySettingsPro
                             You can manage your instances in the <strong>Radarr/Sonarr</strong> tab in Advanced Settings.
                         </Alert>
                     )}
+                    <hr />
+                    <Form.Group>
+                        <Form.Check
+                            type="checkbox"
+                            id="direct-deletion-fallback-checkbox"
+                            label="Enable direct deletion fallback"
+                            checked={config["integrity.direct_deletion_fallback"] === "true"}
+                            onChange={e => setNewConfig({ ...config, "integrity.direct_deletion_fallback": e.target.checked ? "true" : "false" })}
+                        />
+                        <Form.Text muted>
+                            When enabled, if Radarr/Sonarr cannot delete a corrupt file (e.g., file not found in their library), 
+                            the system will delete the file directly from the filesystem. Leave disabled for safety.
+                        </Form.Text>
+                    </Form.Group>
                 </>
             )}
 
@@ -255,5 +269,6 @@ export function isIntegritySettingsUpdated(config: Record<string, string>, newCo
         || config["integrity.interval_hours"] !== newConfig["integrity.interval_hours"]
         || config["integrity.interval_days"] !== newConfig["integrity.interval_days"]
         || config["integrity.max_files_per_run"] !== newConfig["integrity.max_files_per_run"]
-        || config["integrity.corrupt_file_action"] !== newConfig["integrity.corrupt_file_action"];
+        || config["integrity.corrupt_file_action"] !== newConfig["integrity.corrupt_file_action"]
+        || config["integrity.direct_deletion_fallback"] !== newConfig["integrity.direct_deletion_fallback"];
 }
