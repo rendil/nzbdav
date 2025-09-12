@@ -365,16 +365,23 @@ public class MediaIntegrityService : IDisposable
             var output = await outputTask;
             var error = await errorTask;
 
+            // Log detailed ffprobe results for debugging
+            Log.Debug("ffprobe results for {FilePath}: Exit code {ExitCode}, Output: '{Output}', Error: '{Error}'", 
+                filePath, process.ExitCode, output?.Trim(), error?.Trim());
+
             // If ffprobe exits with error code or produces error output, file is likely corrupt
             if (process.ExitCode != 0 || !string.IsNullOrWhiteSpace(error))
             {
-                Log.Debug("ffprobe detected issues with {FilePath}: Exit code {ExitCode}, Error: {Error}", 
+                Log.Warning("ffprobe detected issues with {FilePath}: Exit code {ExitCode}, Error: {Error}", 
                     filePath, process.ExitCode, error);
                 return true; // File is corrupt
             }
 
-            // If we get a valid codec name in output, file is likely good
-            return string.IsNullOrWhiteSpace(output);
+            // If we get a valid codec name in output, file is good; if no output, file is corrupt
+            var isCorrupt = string.IsNullOrWhiteSpace(output);
+            Log.Debug("File integrity check result for {FilePath}: IsCorrupt={IsCorrupt}, Output='{Output}'", 
+                filePath, isCorrupt, output?.Trim());
+            return isCorrupt;
         }
         catch (Exception ex)
         {

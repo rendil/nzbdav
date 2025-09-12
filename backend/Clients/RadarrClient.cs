@@ -42,6 +42,16 @@ public class RadarrClient : ArrClient
                 return false;
             }
 
+            // Log all movie file paths for debugging
+            Log.Debug("Searching for file '{FilePath}' in {MovieCount} movies from Radarr instance '{InstanceName}'", 
+                filePath, movies.Length, _instanceName);
+            
+            foreach (var movie in movies.Take(3)) // Log first 3 for debugging
+            {
+                Log.Debug("Movie: '{Title}', File path: '{MovieFilePath}'", 
+                    movie.Title, movie.MovieFile?.Path ?? "No file");
+            }
+
             // Find the movie that matches the file path
             var targetMovie = movies.FirstOrDefault(m => 
                 !string.IsNullOrEmpty(m.MovieFile?.Path) && 
@@ -49,9 +59,27 @@ public class RadarrClient : ArrClient
 
             if (targetMovie == null)
             {
-                Log.Warning("Could not find movie with file path '{FilePath}' in Radarr instance '{InstanceName}'", 
+                Log.Warning("Could not find movie with file path '{FilePath}' in Radarr instance '{InstanceName}'. Tried full path comparison.", 
                     filePath, _instanceName);
-                return false;
+                
+                // Try filename-only comparison as fallback
+                var fileName = Path.GetFileName(filePath);
+                var fileNameMatch = movies.FirstOrDefault(m => 
+                    !string.IsNullOrEmpty(m.MovieFile?.Path) && 
+                    Path.GetFileName(m.MovieFile.Path).Equals(fileName, StringComparison.OrdinalIgnoreCase));
+                
+                if (fileNameMatch != null)
+                {
+                    Log.Information("Found movie by filename match: '{Title}', File: '{MovieFilePath}'", 
+                        fileNameMatch.Title, fileNameMatch.MovieFile?.Path);
+                    targetMovie = fileNameMatch;
+                }
+                else
+                {
+                    Log.Warning("Could not find movie even by filename '{FileName}' in Radarr instance '{InstanceName}'", 
+                        fileName, _instanceName);
+                    return false;
+                }
             }
 
             // Delete the movie file
