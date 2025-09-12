@@ -226,8 +226,10 @@ function getChangedConfig(
     newConfig: Record<string, string>
 ): Record<string, string> {
     let changedConfig: Record<string, string> = {};
-    let configKeys = Object.keys(defaultConfig);
-    for (const configKey of configKeys) {
+    
+    // Check all keys from newConfig (includes dynamic arr keys)
+    const allConfigKeys = Object.keys(newConfig);
+    for (const configKey of allConfigKeys) {
         if (config[configKey] !== newConfig[configKey]) {
             changedConfig[configKey] = newConfig[configKey];
         }
