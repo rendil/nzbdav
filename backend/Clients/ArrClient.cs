@@ -4,7 +4,7 @@ using Serilog;
 
 namespace NzbWebDAV.Clients;
 
-public abstract class ArrClient
+public abstract class ArrClient : IDisposable
 {
     protected readonly HttpClient _httpClient;
     protected readonly string _baseUrl;

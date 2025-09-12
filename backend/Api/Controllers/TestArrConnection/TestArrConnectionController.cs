@@ -23,9 +23,96 @@ public class TestArrConnectionController(ArrManager arrManager) : BaseApiControl
         };
     }
 
+    private async Task<TestArrConnectionResponse> TestSingleConnection(string appType, string url, string apiKey, string name)
+    {
+        try
+        {
+            // Create a temporary client to test the connection
+            if (appType.ToLowerInvariant() == "radarr")
+            {
+                using var client = new RadarrClient(url, apiKey, name);
+                var success = await client.TestConnectionAsync();
+                
+                return new TestArrConnectionResponse
+                {
+                    Success = success,
+                    Message = success 
+                        ? "Connected successfully to Radarr"
+                        : "Failed to connect to Radarr - check URL and API key"
+                };
+            }
+            else if (appType.ToLowerInvariant() == "sonarr")
+            {
+                using var client = new SonarrClient(url, apiKey, name);
+                var success = await client.TestConnectionAsync();
+                
+                return new TestArrConnectionResponse
+                {
+                    Success = success,
+                    Message = success 
+                        ? "Connected successfully to Sonarr"
+                        : "Failed to connect to Sonarr - check URL and API key"
+                };
+            }
+            else
+            {
+                return new TestArrConnectionResponse
+                {
+                    Success = false,
+                    Message = $"Unsupported app type: {appType}"
+                };
+            }
+        }
+        catch (Exception ex)
+        {
+            return new TestArrConnectionResponse
+            {
+                Success = false,
+                Message = $"Connection test failed: {ex.Message}"
+            };
+        }
+    }
+
     protected override async Task<IActionResult> HandleRequest()
     {
-        var response = await TestConnections();
-        return Ok(response);
+        // Check if this is a single connection test (POST with body) or all connections test (GET)
+        if (Request.Method == "POST")
+        {
+            try
+            {
+                using var reader = new StreamReader(Request.Body);
+                var json = await reader.ReadToEndAsync();
+                var testRequest = System.Text.Json.JsonSerializer.Deserialize<TestSingleConnectionRequest>(json, new System.Text.Json.JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+
+                if (testRequest == null || string.IsNullOrEmpty(testRequest.AppType) || string.IsNullOrEmpty(testRequest.Url) || string.IsNullOrEmpty(testRequest.ApiKey))
+                {
+                    return BadRequest(new TestArrConnectionResponse
+                    {
+                        Success = false,
+                        Message = "AppType, Url, and ApiKey are required"
+                    });
+                }
+
+                var response = await TestSingleConnection(testRequest.AppType, testRequest.Url, testRequest.ApiKey, testRequest.Name ?? "Test");
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new TestArrConnectionResponse
+                {
+                    Success = false,
+                    Message = $"Invalid request: {ex.Message}"
+                });
+            }
+        }
+        else
+        {
+            // Default behavior: test all configured connections
+            var response = await TestConnections();
+            return Ok(response);
+        }
     }
 }

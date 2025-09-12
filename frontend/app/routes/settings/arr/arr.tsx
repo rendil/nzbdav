@@ -131,21 +131,29 @@ export function ArrSettings({ config, setNewConfig }: ArrSettingsProps) {
         ));
 
         try {
-            // Test connection by attempting to get system status
-            const response = await fetch(`${instance.url}/api/v3/system/status`, {
+            // Test connection via backend API to avoid CORS issues
+            const response = await fetch("/api/test-arr-connection", {
+                method: "POST",
                 headers: {
-                    'X-Api-Key': instance.apiKey
-                }
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    appType: instance.type,
+                    url: instance.url,
+                    apiKey: instance.apiKey,
+                    name: instance.name || `${instance.type}-test`
+                })
             });
 
-            if (response.ok) {
-                const data = await response.json();
+            const data = await response.json();
+
+            if (response.ok && data.success) {
                 setInstances(instances.map(inst => 
                     inst.id === id ? {
                         ...inst,
                         testing: false,
                         testResult: 'success',
-                        testMessage: `Connected successfully to ${instance.type} v${data.version}`
+                        testMessage: data.message
                     } : inst
                 ));
             } else {
@@ -154,7 +162,7 @@ export function ArrSettings({ config, setNewConfig }: ArrSettingsProps) {
                         ...inst,
                         testing: false,
                         testResult: 'error',
-                        testMessage: `Connection failed: ${response.status} ${response.statusText}`
+                        testMessage: data.message || `Connection failed: ${response.status} ${response.statusText}`
                     } : inst
                 ));
             }
