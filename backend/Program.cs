@@ -14,6 +14,7 @@ using NzbWebDAV.Database;
 using NzbWebDAV.Extensions;
 using NzbWebDAV.Middlewares;
 using NzbWebDAV.Queue;
+using NzbWebDAV.Tasks;
 using NzbWebDAV.Utils;
 using NzbWebDAV.WebDav;
 using NzbWebDAV.WebDav.Base;
@@ -70,6 +71,7 @@ class Program
             .AddSingleton(websocketManager)
             .AddSingleton<UsenetStreamingClient>()
             .AddSingleton<QueueManager>()
+            .AddSingleton<MediaIntegrityService>()
             .AddScoped<DavDatabaseContext>()
             .AddScoped<DavDatabaseClient>()
             .AddScoped<DatabaseStore>()

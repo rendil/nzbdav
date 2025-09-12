@@ -7,6 +7,7 @@ import React, { useEffect } from "react";
 import { isSabnzbdSettingsUpdated, isSabnzbdSettingsValid, SabnzbdSettings } from "./sabnzbd/sabnzbd";
 import { isWebdavSettingsUpdated, isWebdavSettingsValid, WebdavSettings } from "./webdav/webdav";
 import { isLibrarySettingsUpdated, LibrarySettings } from "./library/library";
+import { isIntegritySettingsUpdated, IntegritySettings } from "./integrity/integrity";
 import { Maintenance } from "./maintenance/maintenance";
 
 const defaultConfig = {
@@ -27,9 +28,14 @@ const defaultConfig = {
     "webdav.enforce-readonly": "true",
     "rclone.mount-dir": "",
     "media.library-dir": "",
+    "integrity.enabled": "false",
+    "integrity.interval_hours": "24",
+    "integrity.interval_days": "7",
+    "integrity.max_files_per_run": "100",
+    "integrity.corrupt_file_action": "log",
 }
 
-const advancedTabs = ["library", "maintenance"];
+const advancedTabs = ["library", "integrity", "maintenance"];
 
 export async function loader({ request }: Route.LoaderArgs) {
     // fetch the config items
@@ -68,12 +74,14 @@ function Body(props: BodyProps) {
     const isSabnzbdUpdated = isSabnzbdSettingsUpdated(config, newConfig);
     const isWebdavUpdated = isWebdavSettingsUpdated(config, newConfig);
     const isLibraryUpdated = isLibrarySettingsUpdated(config, newConfig);
-    const isUpdated = iseUsenetUpdated || isSabnzbdUpdated || isWebdavUpdated || isLibraryUpdated;
+    const isIntegrityUpdated = isIntegritySettingsUpdated(config, newConfig);
+    const isUpdated = iseUsenetUpdated || isSabnzbdUpdated || isWebdavUpdated || isLibraryUpdated || isIntegrityUpdated;
 
     const usenetTitle = iseUsenetUpdated ? "Usenet ✏️" : "Usenet";
     const sabnzbdTitle = isSabnzbdUpdated ? "SABnzbd ✏️" : "SABnzbd";
     const webdavTitle = isWebdavUpdated ? "WebDAV ✏️" : "WebDAV";
     const libraryTitle = isLibraryUpdated ? "Library ✏️" : "Library";
+    const integrityTitle = isIntegrityUpdated ? "Integrity ✏️" : "Integrity";
 
     const saveButtonLabel = isSaving ? "Saving..."
         : !isUpdated && isSaved ? "Saved ✅"
@@ -142,6 +150,11 @@ function Body(props: BodyProps) {
                 {showAdvanced &&
                     <Tab eventKey="library" title={libraryTitle}>
                         <LibrarySettings savedConfig={config} config={newConfig} setNewConfig={setNewConfig} />
+                    </Tab>
+                }
+                {showAdvanced &&
+                    <Tab eventKey="integrity" title={integrityTitle}>
+                        <IntegritySettings config={newConfig} setNewConfig={setNewConfig} />
                     </Tab>
                 }
                 {showAdvanced &&
