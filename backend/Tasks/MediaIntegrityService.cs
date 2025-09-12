@@ -339,8 +339,8 @@ public class MediaIntegrityService : IDisposable
 
         try
         {
-            // Use ffprobe to check media integrity
-            var ffprobeArgs = $"-v error -select_streams v:0 -show_entries stream=codec_name -of csv=p=0 \"{filePath}\"";
+            // Use ffprobe to check basic media integrity - check for any streams
+            var ffprobeArgs = $"-v error -show_entries format=duration -show_entries stream=codec_type,codec_name -of csv=p=0 \"{filePath}\"";
             
             using var process = new Process
             {
@@ -366,21 +366,35 @@ public class MediaIntegrityService : IDisposable
             var error = await errorTask;
 
             // Log detailed ffprobe results for debugging
-            Log.Debug("ffprobe results for {FilePath}: Exit code {ExitCode}, Output: '{Output}', Error: '{Error}'", 
+            Log.Information("ffprobe results for {FilePath}: Exit code {ExitCode}, Output: '{Output}', Error: '{Error}'", 
                 filePath, process.ExitCode, output?.Trim(), error?.Trim());
 
-            // If ffprobe exits with error code or produces error output, file is likely corrupt
-            if (process.ExitCode != 0 || !string.IsNullOrWhiteSpace(error))
+            // If ffprobe exits with error code, file is likely corrupt
+            if (process.ExitCode != 0)
             {
                 Log.Warning("ffprobe detected issues with {FilePath}: Exit code {ExitCode}, Error: {Error}", 
                     filePath, process.ExitCode, error);
                 return true; // File is corrupt
             }
 
-            // If we get a valid codec name in output, file is good; if no output, file is corrupt
-            var isCorrupt = string.IsNullOrWhiteSpace(output);
-            Log.Debug("File integrity check result for {FilePath}: IsCorrupt={IsCorrupt}, Output='{Output}'", 
-                filePath, isCorrupt, output?.Trim());
+            // If there are error messages but exit code is 0, it might still be playable
+            if (!string.IsNullOrWhiteSpace(error))
+            {
+                Log.Information("ffprobe warnings for {FilePath}: {Error}", filePath, error);
+                // Don't automatically mark as corrupt for warnings, only for exit code != 0
+            }
+
+            // If we get output with stream/format information, file is readable
+            var hasValidOutput = !string.IsNullOrWhiteSpace(output) && (
+                output.Contains("video") || 
+                output.Contains("audio") || 
+                output.Contains("subtitle") ||
+                output.Contains(",") // Any CSV output indicates some stream was found
+            );
+            
+            var isCorrupt = !hasValidOutput;
+            Log.Information("File integrity check result for {FilePath}: IsCorrupt={IsCorrupt}, HasValidOutput={HasValidOutput}, Output='{Output}'", 
+                filePath, isCorrupt, hasValidOutput, output?.Trim());
             return isCorrupt;
         }
         catch (Exception ex)
