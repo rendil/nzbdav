@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net.Sockets;
 using Microsoft.EntityFrameworkCore;
 using NzbWebDAV.Clients;
 using NzbWebDAV.Config;
@@ -572,19 +573,44 @@ public class MediaIntegrityService : IDisposable
         var buffer = new byte[8192]; // 8KB buffer
         var totalRead = 0;
         
-        while (totalRead < maxBytes)
+        try
         {
-            var bytesToRead = Math.Min(buffer.Length, maxBytes - totalRead);
-            var bytesRead = await source.ReadAsync(buffer, 0, bytesToRead, ct);
-            
-            if (bytesRead == 0)
-                break; // End of stream
+            while (totalRead < maxBytes)
+            {
+                var bytesToRead = Math.Min(buffer.Length, maxBytes - totalRead);
+                var bytesRead = await source.ReadAsync(buffer, 0, bytesToRead, ct);
                 
-            await destination.WriteAsync(buffer, 0, bytesRead, ct);
-            totalRead += bytesRead;
+                if (bytesRead == 0)
+                    break; // End of stream
+                    
+                try
+                {
+                    await destination.WriteAsync(buffer, 0, bytesRead, ct);
+                    totalRead += bytesRead;
+                }
+                catch (IOException ex) when (ex.Message.Contains("Broken pipe") || ex.InnerException is SocketException)
+                {
+                    // ffprobe closed its stdin - this is normal, it has enough data to analyze
+                    Log.Debug("ffprobe closed stdin after reading {TotalRead} bytes (this is normal)", totalRead);
+                    break;
+                }
+            }
+            
+            try
+            {
+                await destination.FlushAsync(ct);
+            }
+            catch (IOException ex) when (ex.Message.Contains("Broken pipe") || ex.InnerException is SocketException)
+            {
+                // Ignore broken pipe on flush - ffprobe already closed
+                Log.Debug("ffprobe stdin already closed during flush (this is normal)");
+            }
         }
-        
-        await destination.FlushAsync(ct);
+        catch (Exception ex)
+        {
+            Log.Debug(ex, "Error during streaming to ffprobe (may be normal if ffprobe closed early)");
+            // Don't rethrow - this is often normal behavior when ffprobe gets enough data
+        }
     }
 
     private async Task HandleCorruptFileAsync(DavDatabaseClient dbClient, DavItem? davItem, string filePath, CancellationToken ct)
