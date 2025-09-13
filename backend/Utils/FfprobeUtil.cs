@@ -7,13 +7,54 @@ namespace NzbWebDAV.Utils;
 public static class FfprobeUtil
 {
     /// <summary>
-    /// Checks if a stream contains valid video/audio content using ffprobe
+    /// Checks if a stream contains valid video/audio content using ffprobe with adaptive sampling
     /// </summary>
     /// <param name="stream">The stream to analyze</param>
-    /// <param name="maxBytes">Maximum bytes to stream to ffprobe (default 20MB)</param>
+    /// <param name="initialBytes">Initial bytes to try (default 5MB for speed)</param>
+    /// <param name="maxBytes">Maximum bytes to try on failure (default 50MB for thoroughness)</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>True if the stream contains valid media content, false if corrupt or invalid</returns>
-    public static async Task<bool> IsValidMediaStreamAsync(Stream stream, int maxBytes = 20 * 1024 * 1024, CancellationToken ct = default)
+    public static async Task<bool> IsValidMediaStreamAsync(Stream stream, int initialBytes = 5 * 1024 * 1024, int maxBytes = 50 * 1024 * 1024, CancellationToken ct = default)
+    {
+        // First attempt: Try with small sample for speed
+        Log.Debug("Attempting media validation with {InitialMB}MB sample", initialBytes / (1024 * 1024));
+        var isValid = await TryValidateMediaStreamAsync(stream, initialBytes, ct);
+        
+        if (isValid)
+        {
+            Log.Debug("Media validation successful with initial {InitialMB}MB sample", initialBytes / (1024 * 1024));
+            return true;
+        }
+        
+        // Second attempt: Try with larger sample for thoroughness (handles late moov atoms)
+        if (maxBytes > initialBytes)
+        {
+            Log.Debug("Initial validation failed, retrying with {MaxMB}MB sample for late moov atom detection", maxBytes / (1024 * 1024));
+            
+            // Reset stream position if possible
+            if (stream.CanSeek)
+            {
+                stream.Position = 0;
+            }
+            
+            isValid = await TryValidateMediaStreamAsync(stream, maxBytes, ct);
+            
+            if (isValid)
+            {
+                Log.Information("Media validation successful with extended {MaxMB}MB sample (late moov atom detected)", maxBytes / (1024 * 1024));
+                return true;
+            }
+        }
+        
+        Log.Debug("Media validation failed with both {InitialMB}MB and {MaxMB}MB samples", 
+            initialBytes / (1024 * 1024), maxBytes / (1024 * 1024));
+        return false;
+    }
+
+    /// <summary>
+    /// Attempts to validate media content with a specific sample size
+    /// </summary>
+    private static async Task<bool> TryValidateMediaStreamAsync(Stream stream, int maxBytes, CancellationToken ct)
     {
         try
         {
@@ -61,19 +102,19 @@ public static class FfprobeUtil
             // Parse and summarize ffprobe output
             var streamSummary = SummarizeStreams(output);
             
-            Log.Debug("ffprobe raw output: Exit code {ExitCode}, Output: '{Output}', Error: '{Error}'", 
-                process.ExitCode, output?.Trim(), error?.Trim());
+            Log.Debug("ffprobe raw output ({SampleMB}MB): Exit code {ExitCode}, Output: '{Output}', Error: '{Error}'", 
+                maxBytes / (1024 * 1024), process.ExitCode, output?.Trim(), error?.Trim());
 
             if (process.ExitCode != 0)
             {
-                Log.Debug("ffprobe detected issues: Exit code {ExitCode}, Error: {Error}", 
-                    process.ExitCode, error);
+                Log.Debug("ffprobe detected issues ({SampleMB}MB): Exit code {ExitCode}, Error: {Error}", 
+                    maxBytes / (1024 * 1024), process.ExitCode, error);
                 return false;
             }
 
             if (!string.IsNullOrWhiteSpace(error))
             {
-                Log.Debug("ffprobe warnings: {Error}", error);
+                Log.Debug("ffprobe warnings ({SampleMB}MB): {Error}", maxBytes / (1024 * 1024), error);
             }
 
             var hasValidOutput = !string.IsNullOrWhiteSpace(output) && (
@@ -85,16 +126,16 @@ public static class FfprobeUtil
             
             if (!hasValidOutput)
             {
-                Log.Debug("No valid media streams detected in content");
+                Log.Debug("No valid media streams detected in {SampleMB}MB sample", maxBytes / (1024 * 1024));
                 return false;
             }
             
-            Log.Debug("Valid media content detected: {StreamSummary}", streamSummary);
+            Log.Debug("Valid media content detected ({SampleMB}MB): {StreamSummary}", maxBytes / (1024 * 1024), streamSummary);
             return true;
         }
         catch (Exception ex)
         {
-            Log.Debug(ex, "Error running ffprobe on stream");
+            Log.Debug(ex, "Error running ffprobe on {SampleMB}MB stream sample", maxBytes / (1024 * 1024));
             
             // If ffprobe is not available, log a warning but don't fail the validation
             if (ex is System.ComponentModel.Win32Exception win32Ex && win32Ex.NativeErrorCode == 2)

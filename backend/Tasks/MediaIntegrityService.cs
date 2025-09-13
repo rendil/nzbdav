@@ -503,8 +503,8 @@ public class MediaIntegrityService : IDisposable
                 return false; // Consider unsupported types as valid
             }
             
-            // Use the shared ffprobe utility to check media integrity
-            var isValid = await FfprobeUtil.IsValidMediaStreamAsync(stream, 20 * 1024 * 1024, ct);
+            // Use the shared ffprobe utility to check media integrity (adaptive: 5MB then 50MB)
+            var isValid = await FfprobeUtil.IsValidMediaStreamAsync(stream, ct: ct);
             
             // Clean up the stream
             await stream.DisposeAsync();

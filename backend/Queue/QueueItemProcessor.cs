@@ -141,13 +141,6 @@ public class QueueItemProcessor(
             .Select(x => x!)
             .ToList();
 
-        // validate video files found (before database operations)
-        if (configManager.IsEnsureImportableVideoEnabled())
-        {
-            var validator = new EnsureImportableVideoValidator(dbClient, usenetClient);
-            await validator.ThrowIfValidationFailsAsync(ct);
-        }
-
         // update the database
         await MarkQueueItemCompleted(startTime, error: null, () =>
         {
@@ -158,6 +151,13 @@ public class QueueItemProcessor(
 
             return mountFolder;
         });
+
+        // validate video files found (after database operations are committed)
+        if (configManager.IsEnsureImportableVideoEnabled())
+        {
+            var validator = new EnsureImportableVideoValidator(dbClient, usenetClient);
+            await validator.ThrowIfValidationFailsAsync(ct);
+        }
     }
 
     private BaseProcessor? GetFileProcessor(NzbFile nzbFile, GetFileInfosStep.FileInfo fileinfo)
