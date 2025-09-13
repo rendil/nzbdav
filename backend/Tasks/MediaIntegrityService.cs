@@ -531,14 +531,17 @@ public class MediaIntegrityService : IDisposable
             // Clean up the stream
             await stream.DisposeAsync();
 
-            // Log detailed ffprobe results for debugging
-            Log.Information("ffprobe results for {FilePath} (streamed): Exit code {ExitCode}, Output: '{Output}', Error: '{Error}'", 
+            // Parse and summarize ffprobe output
+            var streamSummary = SummarizeStreams(output);
+            
+            // Log detailed ffprobe results for debugging (full output only in debug mode)
+            Log.Debug("ffprobe raw output for {FilePath}: Exit code {ExitCode}, Output: '{Output}', Error: '{Error}'", 
                 davItem.Path, process.ExitCode, output?.Trim(), error?.Trim());
 
             // If ffprobe exits with error code, file is likely corrupt
             if (process.ExitCode != 0)
             {
-                Log.Warning("ffprobe detected issues with {FilePath} (streamed): Exit code {ExitCode}, Error: {Error}", 
+                Log.Warning("ffprobe detected issues with {FilePath}: Exit code {ExitCode}, Error: {Error}", 
                     davItem.Path, process.ExitCode, error);
                 return true; // File is corrupt
             }
@@ -546,7 +549,7 @@ public class MediaIntegrityService : IDisposable
             // If there are error messages but exit code is 0, it might still be playable
             if (!string.IsNullOrWhiteSpace(error))
             {
-                Log.Information("ffprobe warnings for {FilePath} (streamed): {Error}", davItem.Path, error);
+                Log.Information("ffprobe warnings for {FilePath}: {Error}", davItem.Path, error);
                 // Don't automatically mark as corrupt for warnings, only for exit code != 0
             }
 
@@ -559,8 +562,17 @@ public class MediaIntegrityService : IDisposable
             );
             
             var isCorrupt = !hasValidOutput;
-            Log.Information("File integrity check result for {FilePath} (streamed): IsCorrupt={IsCorrupt}, HasValidOutput={HasValidOutput}, Output='{Output}'", 
-                davItem.Path, isCorrupt, hasValidOutput, output?.Trim());
+            
+            // Log concise result with stream summary
+            if (isCorrupt)
+            {
+                Log.Warning("File integrity check FAILED for {FilePath}: No valid streams detected", davItem.Path);
+            }
+            else
+            {
+                Log.Information("File integrity check PASSED for {FilePath}: {StreamSummary}", davItem.Path, streamSummary);
+            }
+            
             return isCorrupt;
         }
         catch (Exception ex)
@@ -592,6 +604,58 @@ public class MediaIntegrityService : IDisposable
         };
         
         return mediaExtensions.Contains(extension);
+    }
+
+    private static string SummarizeStreams(string? ffprobeOutput)
+    {
+        if (string.IsNullOrWhiteSpace(ffprobeOutput))
+            return "No streams detected";
+
+        var lines = ffprobeOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        var videoStreams = 0;
+        var audioStreams = 0;
+        var subtitleStreams = 0;
+        var videoCodec = "";
+        var audioCodec = "";
+        var duration = "";
+
+        foreach (var line in lines)
+        {
+            var trimmed = line.Trim();
+            if (trimmed.Contains(",video"))
+            {
+                videoStreams++;
+                if (string.IsNullOrEmpty(videoCodec))
+                    videoCodec = trimmed.Split(',')[0];
+            }
+            else if (trimmed.Contains(",audio"))
+            {
+                audioStreams++;
+                if (string.IsNullOrEmpty(audioCodec))
+                    audioCodec = trimmed.Split(',')[0];
+            }
+            else if (trimmed.Contains(",subtitle"))
+            {
+                subtitleStreams++;
+            }
+            else if (char.IsDigit(trimmed[0]) && trimmed.Contains("."))
+            {
+                // This looks like a duration
+                duration = trimmed;
+            }
+        }
+
+        var parts = new List<string>();
+        if (videoStreams > 0)
+            parts.Add($"{videoStreams} video ({videoCodec})");
+        if (audioStreams > 0)
+            parts.Add($"{audioStreams} audio ({audioCodec})");
+        if (subtitleStreams > 0)
+            parts.Add($"{subtitleStreams} subtitle");
+        if (!string.IsNullOrEmpty(duration))
+            parts.Add($"{duration}s");
+
+        return parts.Count > 0 ? string.Join(", ", parts) : "Unknown format";
     }
 
     private static async Task StreamDataToProcessAsync(Stream source, Stream destination, int maxBytes, CancellationToken ct)
