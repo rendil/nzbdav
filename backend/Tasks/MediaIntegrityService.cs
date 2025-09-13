@@ -11,11 +11,18 @@ using Serilog;
 
 namespace NzbWebDAV.Tasks;
 
+public class IntegrityCheckItem
+{
+    public required DavItem DavItem { get; init; }
+    public string? LibraryFilePath { get; init; }
+}
+
 public class MediaIntegrityService : IDisposable
 {
     private readonly ConfigManager _configManager;
     private readonly WebsocketManager _websocketManager;
     private readonly ArrManager _arrManager;
+    private readonly UsenetStreamingClient _usenetClient;
     private readonly CancellationTokenSource _cancellationTokenSource;
     private readonly SemaphoreSlim _semaphore = new(1, 1);
     
@@ -25,12 +32,14 @@ public class MediaIntegrityService : IDisposable
     public MediaIntegrityService(
         ConfigManager configManager,
         WebsocketManager websocketManager,
-        ArrManager arrManager
+        ArrManager arrManager,
+        UsenetStreamingClient usenetClient
     )
     {
         _configManager = configManager;
         _websocketManager = websocketManager;
         _arrManager = arrManager;
+        _usenetClient = usenetClient;
         _cancellationTokenSource = CancellationTokenSource
             .CreateLinkedTokenSource(SigtermUtil.GetCancellationToken());
         
@@ -122,60 +131,67 @@ public class MediaIntegrityService : IDisposable
             await using var dbContext = new DavDatabaseContext();
             var dbClient = new DavDatabaseClient(dbContext);
 
-            // Get media files to check based on configuration
-            List<string> filePaths;
+            // Get items to check based on configuration
+            List<IntegrityCheckItem> checkItems;
             if (!string.IsNullOrEmpty(libraryDir) && Directory.Exists(libraryDir))
             {
-                // Use library directory for arr integration
-                filePaths = await GetLibraryFilesToCheckAsync(libraryDir, ct);
-                Log.Information("Checking files in library directory: {LibraryDir}", libraryDir);
+                // Use library directory for arr integration - resolve symlinks to DavItems
+                checkItems = await GetLibraryIntegrityCheckItemsAsync(dbClient, libraryDir, ct);
+                Log.Information("Checking {Count} library files in: {LibraryDir}", checkItems.Count, libraryDir);
             }
             else
             {
                 // Fallback to internal files for non-arr usage
                 var davItems = await GetDavItemsToCheckAsync(dbClient, ct);
-                filePaths = davItems.Select(item => 
-                    DatabaseStoreSymlinkFile.GetTargetPath(item, _configManager.GetRcloneMountDir())).ToList();
-                Log.Information("Checking internal nzbdav files");
+                checkItems = davItems.Select(item => new IntegrityCheckItem 
+                { 
+                    DavItem = item, 
+                    LibraryFilePath = null // No library file path for internal items
+                }).ToList();
+                Log.Information("Checking {Count} internal nzbdav files", checkItems.Count);
             }
             
-            if (filePaths.Count == 0)
+            if (checkItems.Count == 0)
             {
                 Log.Information("No media files found to check");
                 _ = _websocketManager.SendMessage(WebsocketTopic.IntegrityCheckProgress, "complete: 0/0");
                 return;
             }
 
-            var totalFiles = filePaths.Count;
+            var totalFiles = checkItems.Count;
             var processedFiles = 0;
             var corruptFiles = 0;
 
             var debounce = DebounceUtil.CreateDebounce(TimeSpan.FromMilliseconds(500));
 
-            foreach (var filePath in filePaths)
+            foreach (var checkItem in checkItems)
             {
                 ct.ThrowIfCancellationRequested();
 
                 try
                 {
-                    var isCorrupt = await CheckFileIntegrityAsync(filePath, ct);
+                    var isCorrupt = await CheckFileIntegrityAsync(checkItem.DavItem, ct);
                     
                     if (isCorrupt)
                     {
                         corruptFiles++;
-                        Log.Warning("Corrupt media file detected: {FilePath}", filePath);
-                        await HandleCorruptFileAsync(dbClient, null, filePath, ct);
+                        Log.Warning("Corrupt media file detected: {FilePath}", checkItem.DavItem.Path);
+                        
+                        // Use library file path for arr integration, or symlink path for internal files
+                        var filePath = checkItem.LibraryFilePath ?? 
+                            DatabaseStoreSymlinkFile.GetTargetPath(checkItem.DavItem, _configManager.GetRcloneMountDir());
+                        await HandleCorruptFileAsync(dbClient, checkItem.DavItem, filePath, ct);
                     }
 
-                    // Update integrity check timestamp for library files
-                    if (!string.IsNullOrEmpty(libraryDir))
+                    // Update integrity check timestamp
+                    if (checkItem.LibraryFilePath != null)
                     {
-                        await UpdateLastIntegrityCheckForLibraryFileAsync(dbClient, filePath, !isCorrupt, ct);
+                        await UpdateLastIntegrityCheckForLibraryFileAsync(dbClient, checkItem.LibraryFilePath, !isCorrupt, ct);
                     }
                 }
                 catch (Exception ex)
                 {
-                    Log.Error(ex, "Error checking integrity of file: {FilePath}", filePath);
+                    Log.Error(ex, "Error checking integrity of file: {FilePath}", checkItem.DavItem.Path);
                 }
 
                 processedFiles++;
@@ -271,6 +287,105 @@ public class MediaIntegrityService : IDisposable
         }
     }
 
+    private async Task<List<IntegrityCheckItem>> GetLibraryIntegrityCheckItemsAsync(DavDatabaseClient dbClient, string libraryDir, CancellationToken ct)
+    {
+        var checkItems = new List<IntegrityCheckItem>();
+        var cutoffTime = DateTime.Now.AddDays(-_configManager.GetIntegrityCheckIntervalDays());
+        
+        try
+        {
+            // Get all media files in library directory recursively
+            var allFiles = Directory.EnumerateFiles(libraryDir, "*", SearchOption.AllDirectories)
+                .Where(file => IsMediaFile(Path.GetExtension(file).ToLowerInvariant()))
+                .ToList();
+
+            Log.Information("Found {FileCount} media files in library directory", allFiles.Count);
+
+            // Resolve symlinks to DavItems and filter out recently checked files
+            foreach (var filePath in allFiles)
+            {
+                ct.ThrowIfCancellationRequested();
+                
+                try
+                {
+                    // Check if we should skip this file based on last check time
+                    var fileHash = GetFilePathHash(filePath);
+                    var lastCheckConfig = $"integrity.last_check.library.{fileHash}";
+                    
+                    var lastCheckValue = await dbClient.Ctx.ConfigItems
+                        .Where(c => c.ConfigName == lastCheckConfig)
+                        .Select(c => c.ConfigValue)
+                        .FirstOrDefaultAsync(ct);
+
+                    if (lastCheckValue != null && DateTime.TryParse(lastCheckValue, out var lastCheck) && lastCheck > cutoffTime)
+                    {
+                        continue; // Skip recently checked files
+                    }
+
+                    // Resolve symlink to get the target path (should be in .ids directory)
+                    var fileInfo = new FileInfo(filePath);
+                    if (!fileInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                    {
+                        Log.Debug("Skipping non-symlink file: {FilePath}", filePath);
+                        continue; // Not a symlink, skip
+                    }
+
+                    var targetPath = fileInfo.ResolveLinkTarget(true)?.FullName;
+                    if (string.IsNullOrEmpty(targetPath))
+                    {
+                        Log.Warning("Could not resolve symlink target for: {FilePath}", filePath);
+                        continue;
+                    }
+
+                    // Extract the GUID from the target path (should be the filename in .ids directory)
+                    var targetFileName = Path.GetFileName(targetPath);
+                    if (!Guid.TryParse(targetFileName, out var davItemId))
+                    {
+                        Log.Debug("Target path does not contain valid GUID: {TargetPath}", targetPath);
+                        continue;
+                    }
+
+                    // Look up the DavItem by ID
+                    var davItem = await dbClient.Ctx.Items
+                        .Where(item => item.Id == davItemId)
+                        .Where(item => item.Type == DavItem.ItemType.NzbFile) // Only NZB files for streaming
+                        .FirstOrDefaultAsync(ct);
+
+                    if (davItem != null)
+                    {
+                        checkItems.Add(new IntegrityCheckItem 
+                        { 
+                            DavItem = davItem, 
+                            LibraryFilePath = filePath 
+                        });
+                        Log.Debug("Resolved library file {FilePath} to DavItem {DavItemPath} (ID: {Id})", 
+                            filePath, davItem.Path, davItem.Id);
+                        
+                        // Limit the number of files per run
+                        if (checkItems.Count >= _configManager.GetMaxFilesToCheckPerRun())
+                            break;
+                    }
+                    else
+                    {
+                        Log.Debug("Could not find DavItem for ID {DavItemId} from {FilePath}", davItemId, filePath);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning(ex, "Error processing library file: {FilePath}", filePath);
+                }
+            }
+
+            Log.Information("Resolved {ResolvedCount} library files to DavItems for integrity check", checkItems.Count);
+            return checkItems;
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Error scanning library directory: {LibraryDir}", libraryDir);
+            return checkItems;
+        }
+    }
+
     private static string GetFilePathHash(string filePath)
     {
         // Create a simple hash of the file path for unique identification
@@ -321,15 +436,9 @@ public class MediaIntegrityService : IDisposable
         await dbClient.Ctx.SaveChangesAsync(ct);
     }
 
-    private async Task<bool> CheckFileIntegrityAsync(string filePath, CancellationToken ct)
+    private async Task<bool> CheckFileIntegrityAsync(DavItem davItem, CancellationToken ct)
     {
-        if (!File.Exists(filePath))
-        {
-            Log.Warning("File not found for integrity check: {FilePath}", filePath);
-            return true; // Consider missing files as corrupt
-        }
-
-        var fileExtension = Path.GetExtension(filePath).ToLowerInvariant();
+        var fileExtension = Path.GetExtension(davItem.Name).ToLowerInvariant();
         
         // Check if it's a media file type we can verify
         if (!IsMediaFile(fileExtension))
@@ -337,10 +446,30 @@ public class MediaIntegrityService : IDisposable
             return false; // Not a media file, consider it valid
         }
 
+        // Only check NZB files - we can't stream RAR files easily
+        if (davItem.Type != DavItem.ItemType.NzbFile)
+        {
+            Log.Debug("Skipping integrity check for non-NZB file: {FilePath}", davItem.Path);
+            return false; // Consider non-NZB files as valid for now
+        }
+
         try
         {
-            // Use ffprobe to check basic media integrity - check for any streams
-            var ffprobeArgs = $"-v error -show_entries format=duration -show_entries stream=codec_type,codec_name -of csv=p=0 \"{filePath}\"";
+            // Get the NZB file data from database
+            await using var dbContext = new DavDatabaseContext();
+            var dbClient = new DavDatabaseClient(dbContext);
+            var nzbFile = await dbClient.GetNzbFileAsync(davItem.Id, ct);
+            if (nzbFile == null)
+            {
+                Log.Warning("Could not find NZB file data for {FilePath} (ID: {Id})", davItem.Path, davItem.Id);
+                return true; // Consider missing NZB data as corrupt
+            }
+
+            // Create a stream from the NZB segments
+            var stream = _usenetClient.GetFileStream(nzbFile.SegmentIds, davItem.FileSize!.Value, _configManager.GetConnectionsPerStream());
+            
+            // Use ffprobe to check basic media integrity by streaming first 20MB
+            var ffprobeArgs = "-v error -show_entries format=duration -show_entries stream=codec_type,codec_name -of csv=p=0 -i -";
             
             using var process = new Process
             {
@@ -349,6 +478,7 @@ public class MediaIntegrityService : IDisposable
                     FileName = "ffprobe",
                     Arguments = ffprobeArgs,
                     UseShellExecute = false,
+                    RedirectStandardInput = true,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     CreateNoWindow = true
@@ -357,30 +487,39 @@ public class MediaIntegrityService : IDisposable
 
             process.Start();
             
+            // Stream the first 20MB to ffprobe's stdin
+            var streamTask = StreamDataToProcessAsync(stream, process.StandardInput.BaseStream, 20 * 1024 * 1024, ct);
             var outputTask = process.StandardOutput.ReadToEndAsync();
             var errorTask = process.StandardError.ReadToEndAsync();
+            
+            // Wait for streaming to complete, then close stdin
+            await streamTask;
+            process.StandardInput.Close();
             
             await process.WaitForExitAsync(ct);
             
             var output = await outputTask;
             var error = await errorTask;
 
+            // Clean up the stream
+            await stream.DisposeAsync();
+
             // Log detailed ffprobe results for debugging
-            Log.Information("ffprobe results for {FilePath}: Exit code {ExitCode}, Output: '{Output}', Error: '{Error}'", 
-                filePath, process.ExitCode, output?.Trim(), error?.Trim());
+            Log.Information("ffprobe results for {FilePath} (streamed): Exit code {ExitCode}, Output: '{Output}', Error: '{Error}'", 
+                davItem.Path, process.ExitCode, output?.Trim(), error?.Trim());
 
             // If ffprobe exits with error code, file is likely corrupt
             if (process.ExitCode != 0)
             {
-                Log.Warning("ffprobe detected issues with {FilePath}: Exit code {ExitCode}, Error: {Error}", 
-                    filePath, process.ExitCode, error);
+                Log.Warning("ffprobe detected issues with {FilePath} (streamed): Exit code {ExitCode}, Error: {Error}", 
+                    davItem.Path, process.ExitCode, error);
                 return true; // File is corrupt
             }
 
             // If there are error messages but exit code is 0, it might still be playable
             if (!string.IsNullOrWhiteSpace(error))
             {
-                Log.Information("ffprobe warnings for {FilePath}: {Error}", filePath, error);
+                Log.Information("ffprobe warnings for {FilePath} (streamed): {Error}", davItem.Path, error);
                 // Don't automatically mark as corrupt for warnings, only for exit code != 0
             }
 
@@ -393,19 +532,19 @@ public class MediaIntegrityService : IDisposable
             );
             
             var isCorrupt = !hasValidOutput;
-            Log.Information("File integrity check result for {FilePath}: IsCorrupt={IsCorrupt}, HasValidOutput={HasValidOutput}, Output='{Output}'", 
-                filePath, isCorrupt, hasValidOutput, output?.Trim());
+            Log.Information("File integrity check result for {FilePath} (streamed): IsCorrupt={IsCorrupt}, HasValidOutput={HasValidOutput}, Output='{Output}'", 
+                davItem.Path, isCorrupt, hasValidOutput, output?.Trim());
             return isCorrupt;
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "Error running ffprobe on {FilePath}", filePath);
+            Log.Error(ex, "Error running ffprobe on {FilePath}", davItem.Path);
             
             // If ffprobe is not found or can't be started, this is a configuration issue
             // We should treat this as a problem that needs attention
             if (ex is System.ComponentModel.Win32Exception win32Ex && win32Ex.NativeErrorCode == 2)
             {
-                Log.Error("ffprobe not found - please ensure FFmpeg is installed. File integrity cannot be verified: {FilePath}", filePath);
+                Log.Error("ffprobe not found - please ensure FFmpeg is installed. File integrity cannot be verified: {FilePath}", davItem.Path);
                 // Return true (corrupt) to indicate there's an issue that needs attention
                 // This prevents silent failures where users think files are checked but they're not
                 return true;
@@ -426,6 +565,26 @@ public class MediaIntegrityService : IDisposable
         };
         
         return mediaExtensions.Contains(extension);
+    }
+
+    private static async Task StreamDataToProcessAsync(Stream source, Stream destination, int maxBytes, CancellationToken ct)
+    {
+        var buffer = new byte[8192]; // 8KB buffer
+        var totalRead = 0;
+        
+        while (totalRead < maxBytes)
+        {
+            var bytesToRead = Math.Min(buffer.Length, maxBytes - totalRead);
+            var bytesRead = await source.ReadAsync(buffer, 0, bytesToRead, ct);
+            
+            if (bytesRead == 0)
+                break; // End of stream
+                
+            await destination.WriteAsync(buffer, 0, bytesRead, ct);
+            totalRead += bytesRead;
+        }
+        
+        await destination.FlushAsync(ct);
     }
 
     private async Task HandleCorruptFileAsync(DavDatabaseClient dbClient, DavItem? davItem, string filePath, CancellationToken ct)
