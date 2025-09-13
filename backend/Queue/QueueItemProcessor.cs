@@ -96,8 +96,11 @@ public class QueueItemProcessor(
         var isAlreadyDownloaded = existingMountFolder is not null;
         if (isAlreadyDownloaded)
         {
-            Log.Information($"Nzb `{queueItem.JobName}` is a duplicate. Skipping and marking complete.");
+            Log.Information($"Nzb `{queueItem.JobName}` is a duplicate. Skipping download but still validating content.");
             await MarkQueueItemCompleted(startTime, error: null, () => existingMountFolder);
+            
+            // Still validate video files for duplicates to ensure they meet current standards
+            await ValidateVideoContent();
             return;
         }
 
@@ -153,6 +156,11 @@ public class QueueItemProcessor(
         });
 
         // validate video files found (after database operations are committed)
+        await ValidateVideoContent();
+    }
+
+    private async Task ValidateVideoContent()
+    {
         if (configManager.IsEnsureImportableVideoEnabled())
         {
             Log.Information("Video validation is enabled, starting validation for job: {JobName}", queueItem.JobName);
