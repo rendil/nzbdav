@@ -495,7 +495,16 @@ public class MediaIntegrityService : IDisposable
             
             // Wait for streaming to complete, then close stdin
             await streamTask;
-            process.StandardInput.Close();
+            
+            try
+            {
+                process.StandardInput.Close();
+            }
+            catch (IOException ex) when (ex.Message.Contains("Pipe is broken") || ex.Message.Contains("Broken pipe"))
+            {
+                // ffprobe already closed the pipe - this is normal
+                Log.Debug("ffprobe stdin pipe already closed (this is normal)");
+            }
             
             await process.WaitForExitAsync(ct);
             
