@@ -346,30 +346,39 @@ public class MediaIntegrityService : IDisposable
                         continue;
                     }
 
-                    // Look up the DavItem by ID
-                    var davItem = await dbClient.Ctx.Items
+                    // Look up the DavItem by ID - first check if it exists at all
+                    var anyDavItem = await dbClient.Ctx.Items
                         .Where(item => item.Id == davItemId)
-                        .Where(item => item.Type == DavItem.ItemType.NzbFile) // Only NZB files for streaming
                         .FirstOrDefaultAsync(ct);
 
-                    if (davItem != null)
+                    if (anyDavItem == null)
                     {
-                        checkItems.Add(new IntegrityCheckItem 
-                        { 
-                            DavItem = davItem, 
-                            LibraryFilePath = filePath 
-                        });
-                        Log.Debug("Resolved library file {FilePath} to DavItem {DavItemPath} (ID: {Id})", 
-                            filePath, davItem.Path, davItem.Id);
-                        
-                        // Limit the number of files per run
-                        if (checkItems.Count >= _configManager.GetMaxFilesToCheckPerRun())
-                            break;
+                        // DavItem doesn't exist - likely imported outside nzbdav or deleted
+                        Log.Debug("Skipping {FilePath}: DavItem {DavItemId} not found (file may have been imported outside nzbdav)", 
+                            Path.GetFileName(filePath), davItemId);
+                        continue;
                     }
-                    else
+
+                    // Check if it's an NZB file (streamable)
+                    if (anyDavItem.Type != DavItem.ItemType.NzbFile)
                     {
-                        Log.Debug("Could not find DavItem for ID {DavItemId} from {FilePath}", davItemId, filePath);
+                        Log.Debug("Skipping {FilePath}: DavItem is {ItemType} (only NZB files supported for streaming integrity check)", 
+                            Path.GetFileName(filePath), anyDavItem.Type);
+                        continue;
                     }
+
+                    // Valid NZB file found
+                    checkItems.Add(new IntegrityCheckItem 
+                    { 
+                        DavItem = anyDavItem, 
+                        LibraryFilePath = filePath 
+                    });
+                    Log.Debug("Added {FilePath} for integrity check (DavItem: {DavItemPath})", 
+                        Path.GetFileName(filePath), anyDavItem.Path);
+                    
+                    // Limit the number of files per run
+                    if (checkItems.Count >= _configManager.GetMaxFilesToCheckPerRun())
+                        break;
                 }
                 catch (Exception ex)
                 {
@@ -377,7 +386,15 @@ public class MediaIntegrityService : IDisposable
                 }
             }
 
-            Log.Information("Resolved {ResolvedCount} library files to DavItems for integrity check", checkItems.Count);
+            var skippedCount = allFiles.Count - checkItems.Count;
+            Log.Information("Library scan complete: {ResolvedCount} files ready for integrity check, {SkippedCount} files skipped", 
+                checkItems.Count, skippedCount);
+            
+            if (skippedCount > 0)
+            {
+                Log.Information("Skipped files are either: RAR files (not streamable), files imported outside nzbdav, or deleted DavItems");
+            }
+            
             return checkItems;
         }
         catch (Exception ex)
