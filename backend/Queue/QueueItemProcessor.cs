@@ -97,10 +97,12 @@ public class QueueItemProcessor(
         if (isAlreadyDownloaded)
         {
             Log.Information($"Nzb `{queueItem.JobName}` is a duplicate. Skipping download but still validating content.");
-            await MarkQueueItemCompleted(startTime, error: null, () => existingMountFolder);
             
-            // Still validate video files for duplicates to ensure they meet current standards
+            // Validate video files for duplicates BEFORE marking as completed
             await ValidateVideoContent();
+            
+            // Only mark as completed if validation passes
+            await MarkQueueItemCompleted(startTime, error: null, () => existingMountFolder);
             return;
         }
 
