@@ -118,8 +118,8 @@ public class EnsureImportableVideoValidator(DavDatabaseClient dbClient, UsenetSt
                 return true; // Assume valid for unsupported types
             }
 
-            // Use smaller sample sizes for download validation (2MB then 10MB for speed)
-            var isValid = await FfprobeUtil.IsValidMediaStreamAsync(stream, 2 * 1024 * 1024, 10 * 1024 * 1024, ct);
+            // Use smaller sample sizes for download validation (2MB then 10MB for speed, MP4: start+end)
+            var isValid = await FfprobeUtil.IsValidMediaStreamAsync(stream, videoFile.Name, 2 * 1024 * 1024, 10 * 1024 * 1024, ct);
             await stream.DisposeAsync();
             
             return isValid;

@@ -10,11 +10,64 @@ public static class FfprobeUtil
     /// Checks if a stream contains valid video/audio content using ffprobe with adaptive sampling
     /// </summary>
     /// <param name="stream">The stream to analyze</param>
+    /// <param name="filePath">Optional file path for format-specific optimizations</param>
     /// <param name="initialBytes">Initial bytes to try (default 5MB for speed)</param>
     /// <param name="maxBytes">Maximum bytes to try on failure (default 50MB for thoroughness)</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>True if the stream contains valid media content, false if corrupt or invalid</returns>
-    public static async Task<bool> IsValidMediaStreamAsync(Stream stream, int initialBytes = 5 * 1024 * 1024, int maxBytes = 50 * 1024 * 1024, CancellationToken ct = default)
+    public static async Task<bool> IsValidMediaStreamAsync(Stream stream, string? filePath = null, int initialBytes = 5 * 1024 * 1024, int maxBytes = 50 * 1024 * 1024, CancellationToken ct = default)
+    {
+        // Check if this is an MP4 file that might benefit from start+end validation
+        var isMp4File = !string.IsNullOrEmpty(filePath) && IsMp4File(filePath);
+        
+        if (isMp4File && stream.CanSeek && stream.Length > initialBytes * 2)
+        {
+            Log.Debug("MP4 file detected, using start+end validation strategy for moov atom detection");
+            return await ValidateMp4FileAsync(stream, initialBytes, ct);
+        }
+        
+        // For non-MP4 files or non-seekable streams, use the standard approach
+        return await ValidateStandardFileAsync(stream, initialBytes, maxBytes, ct);
+    }
+
+    /// <summary>
+    /// Validates MP4 files by checking both start and end of file for moov atom
+    /// </summary>
+    private static async Task<bool> ValidateMp4FileAsync(Stream stream, int sampleSize, CancellationToken ct)
+    {
+        // First attempt: Check beginning of file (optimized MP4s)
+        Log.Debug("Checking MP4 file start ({SampleMB}MB) for moov atom", sampleSize / (1024 * 1024));
+        stream.Position = 0;
+        var isValidStart = await TryValidateMediaStreamAsync(stream, sampleSize, ct);
+        
+        if (isValidStart)
+        {
+            Log.Debug("MP4 validation successful with start sample (optimized file)");
+            return true;
+        }
+        
+        // Second attempt: Check end of file (unoptimized MP4s with moov at end)
+        var endPosition = Math.Max(0, stream.Length - sampleSize);
+        Log.Debug("Start validation failed, checking MP4 file end ({SampleMB}MB from position {EndPosition}) for moov atom", 
+            sampleSize / (1024 * 1024), endPosition);
+        
+        stream.Position = endPosition;
+        var isValidEnd = await TryValidateMediaStreamAsync(stream, sampleSize, ct);
+        
+        if (isValidEnd)
+        {
+            Log.Information("MP4 validation successful with end sample (unoptimized file with late moov atom)");
+            return true;
+        }
+        
+        Log.Debug("MP4 validation failed with both start and end samples");
+        return false;
+    }
+
+    /// <summary>
+    /// Standard validation approach for non-MP4 files
+    /// </summary>
+    private static async Task<bool> ValidateStandardFileAsync(Stream stream, int initialBytes, int maxBytes, CancellationToken ct)
     {
         // First attempt: Try with small sample for speed
         Log.Debug("Attempting media validation with {InitialMB}MB sample", initialBytes / (1024 * 1024));
@@ -26,10 +79,10 @@ public static class FfprobeUtil
             return true;
         }
         
-        // Second attempt: Try with larger sample for thoroughness (handles late moov atoms)
+        // Second attempt: Try with larger sample for thoroughness
         if (maxBytes > initialBytes)
         {
-            Log.Debug("Initial validation failed, retrying with {MaxMB}MB sample for late moov atom detection", maxBytes / (1024 * 1024));
+            Log.Debug("Initial validation failed, retrying with {MaxMB}MB sample", maxBytes / (1024 * 1024));
             
             // Reset stream position if possible
             if (stream.CanSeek)
@@ -41,7 +94,7 @@ public static class FfprobeUtil
             
             if (isValid)
             {
-                Log.Information("Media validation successful with extended {MaxMB}MB sample (late moov atom detected)", maxBytes / (1024 * 1024));
+                Log.Information("Media validation successful with extended {MaxMB}MB sample", maxBytes / (1024 * 1024));
                 return true;
             }
         }
@@ -49,6 +102,15 @@ public static class FfprobeUtil
         Log.Debug("Media validation failed with both {InitialMB}MB and {MaxMB}MB samples", 
             initialBytes / (1024 * 1024), maxBytes / (1024 * 1024));
         return false;
+    }
+
+    /// <summary>
+    /// Checks if a file is an MP4 container format
+    /// </summary>
+    private static bool IsMp4File(string filePath)
+    {
+        var extension = Path.GetExtension(filePath).ToLowerInvariant();
+        return extension is ".mp4" or ".m4v" or ".mov" or ".3gp" or ".3g2";
     }
 
     /// <summary>
