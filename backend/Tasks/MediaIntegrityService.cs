@@ -5,6 +5,7 @@ using NzbWebDAV.Clients;
 using NzbWebDAV.Config;
 using NzbWebDAV.Database;
 using NzbWebDAV.Database.Models;
+using NzbWebDAV.Streams;
 using NzbWebDAV.Utils;
 using NzbWebDAV.WebDav;
 using NzbWebDAV.Websocket;
@@ -295,12 +296,13 @@ public class MediaIntegrityService : IDisposable
         
         try
         {
-            // Get all media files in library directory recursively
+            // Get media files in library directory recursively (use enumerable for efficiency)
             var allFiles = Directory.EnumerateFiles(libraryDir, "*", SearchOption.AllDirectories)
-                .Where(file => IsMediaFile(Path.GetExtension(file).ToLowerInvariant()))
-                .ToList();
+                .Where(file => IsMediaFile(Path.GetExtension(file).ToLowerInvariant()));
 
-            Log.Information("Found {FileCount} media files in library directory", allFiles.Count);
+            Log.Information("Scanning library directory for media files...");
+            var processedCount = 0;
+            var maxFiles = _configManager.GetMaxFilesToCheckPerRun();
 
             // Resolve symlinks to DavItems and filter out recently checked files
             foreach (var filePath in allFiles)
@@ -359,26 +361,30 @@ public class MediaIntegrityService : IDisposable
                         continue;
                     }
 
-                    // Check if it's an NZB file (streamable)
-                    if (anyDavItem.Type != DavItem.ItemType.NzbFile)
+                    // Check if it's a streamable file type (NZB or RAR)
+                    if (anyDavItem.Type != DavItem.ItemType.NzbFile && anyDavItem.Type != DavItem.ItemType.RarFile)
                     {
-                        Log.Debug("Skipping {FilePath}: DavItem is {ItemType} (only NZB files supported for streaming integrity check)", 
+                        Log.Debug("Skipping {FilePath}: DavItem is {ItemType} (only NZB and RAR files supported for streaming integrity check)", 
                             Path.GetFileName(filePath), anyDavItem.Type);
+                        processedCount++;
                         continue;
                     }
 
-                    // Valid NZB file found
+                    // Valid streamable file found
                     checkItems.Add(new IntegrityCheckItem 
                     { 
                         DavItem = anyDavItem, 
                         LibraryFilePath = filePath 
                     });
-                    Log.Debug("Added {FilePath} for integrity check (DavItem: {DavItemPath})", 
-                        Path.GetFileName(filePath), anyDavItem.Path);
+                    Log.Debug("Added {FilePath} for integrity check (DavItem: {DavItemPath}, Type: {ItemType})", 
+                        Path.GetFileName(filePath), anyDavItem.Path, anyDavItem.Type);
                     
                     // Limit the number of files per run
-                    if (checkItems.Count >= _configManager.GetMaxFilesToCheckPerRun())
+                    if (checkItems.Count >= maxFiles)
+                    {
+                        Log.Information("Reached file limit of {MaxFiles}, stopping scan", maxFiles);
                         break;
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -386,13 +392,13 @@ public class MediaIntegrityService : IDisposable
                 }
             }
 
-            var skippedCount = allFiles.Count - checkItems.Count;
+            var skippedCount = processedCount - checkItems.Count;
             Log.Information("Library scan complete: {ResolvedCount} files ready for integrity check, {SkippedCount} files skipped", 
                 checkItems.Count, skippedCount);
             
             if (skippedCount > 0)
             {
-                Log.Information("Skipped files are either: RAR files (not streamable), files imported outside nzbdav, or deleted DavItems");
+                Log.Information("Skipped files are either: files imported outside nzbdav, deleted DavItems, or unsupported file types");
             }
             
             return checkItems;
@@ -464,27 +470,38 @@ public class MediaIntegrityService : IDisposable
             return false; // Not a media file, consider it valid
         }
 
-        // Only check NZB files - we can't stream RAR files easily
-        if (davItem.Type != DavItem.ItemType.NzbFile)
-        {
-            Log.Debug("Skipping integrity check for non-NZB file: {FilePath}", davItem.Path);
-            return false; // Consider non-NZB files as valid for now
-        }
-
         try
         {
-            // Get the NZB file data from database
+            // Get the file data from database and create appropriate stream
             await using var dbContext = new DavDatabaseContext();
             var dbClient = new DavDatabaseClient(dbContext);
-            var nzbFile = await dbClient.GetNzbFileAsync(davItem.Id, ct);
-            if (nzbFile == null)
+            
+            Stream stream;
+            if (davItem.Type == DavItem.ItemType.NzbFile)
             {
-                Log.Warning("Could not find NZB file data for {FilePath} (ID: {Id})", davItem.Path, davItem.Id);
-                return true; // Consider missing NZB data as corrupt
+                var nzbFile = await dbClient.GetNzbFileAsync(davItem.Id, ct);
+                if (nzbFile == null)
+                {
+                    Log.Warning("Could not find NZB file data for {FilePath} (ID: {Id})", davItem.Path, davItem.Id);
+                    return true; // Consider missing NZB data as corrupt
+                }
+                stream = _usenetClient.GetFileStream(nzbFile.SegmentIds, davItem.FileSize!.Value, _configManager.GetConnectionsPerStream());
             }
-
-            // Create a stream from the NZB segments
-            var stream = _usenetClient.GetFileStream(nzbFile.SegmentIds, davItem.FileSize!.Value, _configManager.GetConnectionsPerStream());
+            else if (davItem.Type == DavItem.ItemType.RarFile)
+            {
+                var rarFile = await dbClient.Ctx.RarFiles.Where(x => x.Id == davItem.Id).FirstOrDefaultAsync(ct);
+                if (rarFile == null)
+                {
+                    Log.Warning("Could not find RAR file data for {FilePath} (ID: {Id})", davItem.Path, davItem.Id);
+                    return true; // Consider missing RAR data as corrupt
+                }
+                stream = new RarFileStream(rarFile.RarParts, _usenetClient, _configManager.GetConnectionsPerStream());
+            }
+            else
+            {
+                Log.Debug("Skipping integrity check for unsupported file type: {FilePath} (Type: {ItemType})", davItem.Path, davItem.Type);
+                return false; // Consider unsupported types as valid
+            }
             
             // Use ffprobe to check basic media integrity by streaming first 20MB
             var ffprobeArgs = "-v error -show_entries format=duration -show_entries stream=codec_type,codec_name -of csv=p=0 -i -";
