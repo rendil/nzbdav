@@ -13,10 +13,15 @@ public class EnsureImportableVideoValidator(DavDatabaseClient dbClient, UsenetSt
 {
     public async Task ThrowIfValidationFailsAsync(CancellationToken ct = default)
     {
+        Log.Information("Starting enhanced video content validation...");
+        
         if (!await IsValidAsync(ct))
         {
+            Log.Error("Video validation FAILED - No importable videos found. Throwing NoVideoFilesFoundException.");
             throw new NoVideoFilesFoundException("No importable videos found.");
         }
+        
+        Log.Information("Video validation PASSED - Valid video content found.");
     }
 
     // Keep the old synchronous method for backward compatibility (filename-only check)
@@ -39,11 +44,18 @@ public class EnsureImportableVideoValidator(DavDatabaseClient dbClient, UsenetSt
 
         if (videoFiles.Count == 0)
         {
-            Log.Information("No video files found by filename extension");
+            Log.Warning("No video files found by filename extension - this should cause validation to fail");
             return false;
         }
 
         Log.Information("Found {VideoFileCount} potential video files, validating content with ffprobe...", videoFiles.Count);
+        
+        // Log the files we found for debugging
+        foreach (var file in videoFiles)
+        {
+            Log.Debug("Found potential video file: {FileName} (Type: {ItemType}, Size: {FileSize})", 
+                file.Name, file.Type, file.FileSize);
+        }
 
         // Check each video file with ffprobe to ensure it's actually valid video content
         var validVideoCount = 0;
@@ -51,20 +63,21 @@ public class EnsureImportableVideoValidator(DavDatabaseClient dbClient, UsenetSt
         {
             try
             {
+                Log.Information("Validating video content for file: {FileName}", videoFile.Name);
                 var isValid = await ValidateVideoContentAsync(videoFile, ct);
                 if (isValid)
                 {
                     validVideoCount++;
-                    Log.Debug("Video file validated: {FileName}", videoFile.Name);
+                    Log.Information("✅ Video file validation PASSED: {FileName}", videoFile.Name);
                 }
                 else
                 {
-                    Log.Warning("Video file failed validation: {FileName} - not valid media content", videoFile.Name);
+                    Log.Warning("❌ Video file validation FAILED: {FileName} - not valid media content", videoFile.Name);
                 }
             }
             catch (Exception ex)
             {
-                Log.Warning(ex, "Error validating video file: {FileName}", videoFile.Name);
+                Log.Error(ex, "❌ Error validating video file: {FileName} - assuming valid to avoid false negatives", videoFile.Name);
                 // If we can't validate, assume it's valid to avoid false negatives
                 validVideoCount++;
             }
