@@ -52,34 +52,14 @@ public class RadarrClient : ArrClient
                     movie.Title, movie.MovieFile?.Path ?? "No file");
             }
 
-            // Find the movie that matches the file path
-            var targetMovie = movies.FirstOrDefault(m => 
-                !string.IsNullOrEmpty(m.MovieFile?.Path) && 
-                Path.GetFullPath(m.MovieFile.Path).Equals(Path.GetFullPath(filePath), StringComparison.OrdinalIgnoreCase));
+            // Try multiple matching strategies in order of preference
+            var targetMovie = FindMovieByPath(movies, filePath);
 
             if (targetMovie == null)
             {
-                Log.Warning("Could not find movie with file path '{FilePath}' in Radarr instance '{InstanceName}'. Tried full path comparison.", 
+                Log.Warning("Could not find movie with file path '{FilePath}' in Radarr instance '{InstanceName}' using any matching strategy", 
                     filePath, _instanceName);
-                
-                // Try filename-only comparison as fallback
-                var fileName = Path.GetFileName(filePath);
-                var fileNameMatch = movies.FirstOrDefault(m => 
-                    !string.IsNullOrEmpty(m.MovieFile?.Path) && 
-                    Path.GetFileName(m.MovieFile.Path).Equals(fileName, StringComparison.OrdinalIgnoreCase));
-                
-                if (fileNameMatch != null)
-                {
-                    Log.Information("Found movie by filename match: '{Title}', File: '{MovieFilePath}'", 
-                        fileNameMatch.Title, fileNameMatch.MovieFile?.Path);
-                    targetMovie = fileNameMatch;
-                }
-                else
-                {
-                    Log.Warning("Could not find movie even by filename '{FileName}' in Radarr instance '{InstanceName}'", 
-                        fileName, _instanceName);
-                    return false;
-                }
+                return false;
             }
 
             // Delete the movie file
@@ -118,6 +98,97 @@ public class RadarrClient : ArrClient
     {
         var movies = await GetAsync<RadarrMovie[]>("/api/v3/movie", ct);
         return movies?.ToList() ?? new List<RadarrMovie>();
+    }
+
+    private RadarrMovie? FindMovieByPath(RadarrMovie[] movies, string filePath)
+    {
+        // Strategy 1: Exact full path match (most reliable)
+        var exactMatch = movies.FirstOrDefault(m => 
+            !string.IsNullOrEmpty(m.MovieFile?.Path) && 
+            string.Equals(m.MovieFile.Path, filePath, StringComparison.OrdinalIgnoreCase));
+        
+        if (exactMatch != null)
+        {
+            Log.Debug("Found movie by exact path match: '{Title}' -> '{FilePath}'", exactMatch.Title, exactMatch.MovieFile?.Path);
+            return exactMatch;
+        }
+
+        // Strategy 2: Normalized full path match (handles different path formats)
+        var normalizedMatch = movies.FirstOrDefault(m => 
+            !string.IsNullOrEmpty(m.MovieFile?.Path) && 
+            NormalizePath(m.MovieFile.Path).Equals(NormalizePath(filePath), StringComparison.OrdinalIgnoreCase));
+        
+        if (normalizedMatch != null)
+        {
+            Log.Debug("Found movie by normalized path match: '{Title}' -> '{FilePath}'", normalizedMatch.Title, normalizedMatch.MovieFile?.Path);
+            return normalizedMatch;
+        }
+
+        // Strategy 3: Filename-only match (fallback for different mount points)
+        var fileName = Path.GetFileName(filePath);
+        var filenameMatch = movies.FirstOrDefault(m => 
+            !string.IsNullOrEmpty(m.MovieFile?.Path) && 
+            string.Equals(Path.GetFileName(m.MovieFile.Path), fileName, StringComparison.OrdinalIgnoreCase));
+        
+        if (filenameMatch != null)
+        {
+            Log.Debug("Found movie by filename match: '{Title}' -> '{FilePath}' (filename: '{FileName}')", 
+                filenameMatch.Title, filenameMatch.MovieFile?.Path, fileName);
+            return filenameMatch;
+        }
+
+        // Strategy 4: Relative path match (handles different root directories)
+        var relativePath = GetRelativePath(filePath);
+        if (!string.IsNullOrEmpty(relativePath))
+        {
+            var relativeMatch = movies.FirstOrDefault(m => 
+                !string.IsNullOrEmpty(m.MovieFile?.Path) && 
+                GetRelativePath(m.MovieFile.Path).Equals(relativePath, StringComparison.OrdinalIgnoreCase));
+            
+            if (relativeMatch != null)
+            {
+                Log.Debug("Found movie by relative path match: '{Title}' -> '{FilePath}' (relative: '{RelativePath}')", 
+                    relativeMatch.Title, relativeMatch.MovieFile?.Path, relativePath);
+                return relativeMatch;
+            }
+        }
+
+        Log.Debug("No movie found for file '{FilePath}' using any matching strategy", filePath);
+        return null;
+    }
+
+    private static string NormalizePath(string path)
+    {
+        // Normalize path separators and resolve relative components
+        try
+        {
+            return Path.GetFullPath(path).Replace('\\', '/').TrimEnd('/');
+        }
+        catch
+        {
+            // If path normalization fails, return the original path with normalized separators
+            return path.Replace('\\', '/').TrimEnd('/');
+        }
+    }
+
+    private static string GetRelativePath(string path)
+    {
+        // Extract the relative path from common root directories
+        var normalizedPath = path.Replace('\\', '/');
+        
+        // Common patterns: /data/media/movies/..., /movies/..., /content/movies/...
+        var patterns = new[] { "/movies/", "/content/", "/media/", "/data/" };
+        
+        foreach (var pattern in patterns)
+        {
+            var index = normalizedPath.IndexOf(pattern, StringComparison.OrdinalIgnoreCase);
+            if (index >= 0)
+            {
+                return normalizedPath.Substring(index + pattern.Length - 1); // Keep the leading slash
+            }
+        }
+        
+        return "";
     }
 }
 

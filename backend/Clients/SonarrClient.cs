@@ -42,14 +42,12 @@ public class SonarrClient : ArrClient
                 return false;
             }
 
-            // Find the episode file that matches the file path
-            var targetEpisodeFile = episodeFiles.FirstOrDefault(ef => 
-                !string.IsNullOrEmpty(ef.Path) && 
-                Path.GetFullPath(ef.Path).Equals(Path.GetFullPath(filePath), StringComparison.OrdinalIgnoreCase));
+            // Try multiple matching strategies in order of preference
+            var targetEpisodeFile = FindEpisodeFileByPath(episodeFiles, filePath);
 
             if (targetEpisodeFile == null)
             {
-                Log.Warning("Could not find episode file with path '{FilePath}' in Sonarr instance '{InstanceName}'", 
+                Log.Warning("Could not find episode file with path '{FilePath}' in Sonarr instance '{InstanceName}' using any matching strategy", 
                     filePath, _instanceName);
                 return false;
             }
@@ -89,6 +87,97 @@ public class SonarrClient : ArrClient
     {
         var episodeFiles = await GetAsync<SonarrEpisodeFile[]>("/api/v3/episodefile", ct);
         return episodeFiles?.ToList() ?? new List<SonarrEpisodeFile>();
+    }
+
+    private SonarrEpisodeFile? FindEpisodeFileByPath(SonarrEpisodeFile[] episodeFiles, string filePath)
+    {
+        // Strategy 1: Exact full path match (most reliable)
+        var exactMatch = episodeFiles.FirstOrDefault(ef => 
+            !string.IsNullOrEmpty(ef.Path) && 
+            string.Equals(ef.Path, filePath, StringComparison.OrdinalIgnoreCase));
+        
+        if (exactMatch != null)
+        {
+            Log.Debug("Found episode file by exact path match: ID {FileId} -> '{FilePath}'", exactMatch.Id, exactMatch.Path);
+            return exactMatch;
+        }
+
+        // Strategy 2: Normalized full path match (handles different path formats)
+        var normalizedMatch = episodeFiles.FirstOrDefault(ef => 
+            !string.IsNullOrEmpty(ef.Path) && 
+            NormalizePath(ef.Path).Equals(NormalizePath(filePath), StringComparison.OrdinalIgnoreCase));
+        
+        if (normalizedMatch != null)
+        {
+            Log.Debug("Found episode file by normalized path match: ID {FileId} -> '{FilePath}'", normalizedMatch.Id, normalizedMatch.Path);
+            return normalizedMatch;
+        }
+
+        // Strategy 3: Filename-only match (fallback for different mount points)
+        var fileName = Path.GetFileName(filePath);
+        var filenameMatch = episodeFiles.FirstOrDefault(ef => 
+            !string.IsNullOrEmpty(ef.Path) && 
+            string.Equals(Path.GetFileName(ef.Path), fileName, StringComparison.OrdinalIgnoreCase));
+        
+        if (filenameMatch != null)
+        {
+            Log.Debug("Found episode file by filename match: ID {FileId} -> '{FilePath}' (filename: '{FileName}')", 
+                filenameMatch.Id, filenameMatch.Path, fileName);
+            return filenameMatch;
+        }
+
+        // Strategy 4: Relative path match (handles different root directories)
+        var relativePath = GetRelativePath(filePath);
+        if (!string.IsNullOrEmpty(relativePath))
+        {
+            var relativeMatch = episodeFiles.FirstOrDefault(ef => 
+                !string.IsNullOrEmpty(ef.Path) && 
+                GetRelativePath(ef.Path).Equals(relativePath, StringComparison.OrdinalIgnoreCase));
+            
+            if (relativeMatch != null)
+            {
+                Log.Debug("Found episode file by relative path match: ID {FileId} -> '{FilePath}' (relative: '{RelativePath}')", 
+                    relativeMatch.Id, relativeMatch.Path, relativePath);
+                return relativeMatch;
+            }
+        }
+
+        Log.Debug("No episode file found for '{FilePath}' using any matching strategy", filePath);
+        return null;
+    }
+
+    private static string NormalizePath(string path)
+    {
+        // Normalize path separators and resolve relative components
+        try
+        {
+            return Path.GetFullPath(path).Replace('\\', '/').TrimEnd('/');
+        }
+        catch
+        {
+            // If path normalization fails, return the original path with normalized separators
+            return path.Replace('\\', '/').TrimEnd('/');
+        }
+    }
+
+    private static string GetRelativePath(string path)
+    {
+        // Extract the relative path from common root directories
+        var normalizedPath = path.Replace('\\', '/');
+        
+        // Common patterns for TV shows: /tv/, /shows/, /series/, /content/tv/...
+        var patterns = new[] { "/tv/", "/shows/", "/series/", "/content/", "/media/", "/data/" };
+        
+        foreach (var pattern in patterns)
+        {
+            var index = normalizedPath.IndexOf(pattern, StringComparison.OrdinalIgnoreCase);
+            if (index >= 0)
+            {
+                return normalizedPath.Substring(index + pattern.Length - 1); // Keep the leading slash
+            }
+        }
+        
+        return "";
     }
 }
 
