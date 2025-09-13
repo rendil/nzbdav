@@ -503,91 +503,21 @@ public class MediaIntegrityService : IDisposable
                 return false; // Consider unsupported types as valid
             }
             
-            // Use ffprobe to check basic media integrity by streaming first 20MB
-            var ffprobeArgs = "-v error -show_entries format=duration -show_entries stream=codec_type,codec_name -of csv=p=0 -i -";
+            // Use the shared ffprobe utility to check media integrity
+            var isValid = await FfprobeUtil.IsValidMediaStreamAsync(stream, 20 * 1024 * 1024, ct);
             
-            using var process = new Process
-            {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = "ffprobe",
-                    Arguments = ffprobeArgs,
-                    UseShellExecute = false,
-                    RedirectStandardInput = true,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true
-                }
-            };
-
-            process.Start();
-            
-            // Stream the first 20MB to ffprobe's stdin
-            var streamTask = StreamDataToProcessAsync(stream, process.StandardInput.BaseStream, 20 * 1024 * 1024, ct);
-            var outputTask = process.StandardOutput.ReadToEndAsync();
-            var errorTask = process.StandardError.ReadToEndAsync();
-            
-            // Wait for streaming to complete, then close stdin
-            await streamTask;
-            
-            try
-            {
-                process.StandardInput.Close();
-            }
-            catch (IOException ex) when (ex.Message.Contains("Pipe is broken") || ex.Message.Contains("Broken pipe"))
-            {
-                // ffprobe already closed the pipe - this is normal
-                Log.Debug("ffprobe stdin pipe already closed (this is normal)");
-            }
-            
-            await process.WaitForExitAsync(ct);
-            
-            var output = await outputTask;
-            var error = await errorTask;
-
             // Clean up the stream
             await stream.DisposeAsync();
-
-            // Parse and summarize ffprobe output
-            var streamSummary = SummarizeStreams(output);
             
-            // Log detailed ffprobe results for debugging (full output only in debug mode)
-            Log.Debug("ffprobe raw output for {FilePath}: Exit code {ExitCode}, Output: '{Output}', Error: '{Error}'", 
-                davItem.Path, process.ExitCode, output?.Trim(), error?.Trim());
-
-            // If ffprobe exits with error code, file is likely corrupt
-            if (process.ExitCode != 0)
-            {
-                Log.Warning("ffprobe detected issues with {FilePath}: Exit code {ExitCode}, Error: {Error}", 
-                    davItem.Path, process.ExitCode, error);
-                return true; // File is corrupt
-            }
-
-            // If there are error messages but exit code is 0, it might still be playable
-            if (!string.IsNullOrWhiteSpace(error))
-            {
-                Log.Information("ffprobe warnings for {FilePath}: {Error}", davItem.Path, error);
-                // Don't automatically mark as corrupt for warnings, only for exit code != 0
-            }
-
-            // If we get output with stream/format information, file is readable
-            var hasValidOutput = !string.IsNullOrWhiteSpace(output) && (
-                output.Contains("video") || 
-                output.Contains("audio") || 
-                output.Contains("subtitle") ||
-                output.Contains(",") // Any CSV output indicates some stream was found
-            );
+            var isCorrupt = !isValid;
             
-            var isCorrupt = !hasValidOutput;
-            
-            // Log concise result with stream summary
             if (isCorrupt)
             {
-                Log.Warning("File integrity check FAILED for {FilePath}: No valid streams detected", davItem.Path);
+                Log.Warning("File integrity check FAILED for {FilePath}: Invalid or corrupt media content", davItem.Path);
             }
             else
             {
-                Log.Information("File integrity check PASSED for {FilePath}: {StreamSummary}", davItem.Path, streamSummary);
+                Log.Information("File integrity check PASSED for {FilePath}", davItem.Path);
             }
             
             return isCorrupt;
@@ -623,102 +553,6 @@ public class MediaIntegrityService : IDisposable
         return mediaExtensions.Contains(extension);
     }
 
-    private static string SummarizeStreams(string? ffprobeOutput)
-    {
-        if (string.IsNullOrWhiteSpace(ffprobeOutput))
-            return "No streams detected";
-
-        var lines = ffprobeOutput.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-        var videoStreams = 0;
-        var audioStreams = 0;
-        var subtitleStreams = 0;
-        var videoCodec = "";
-        var audioCodec = "";
-        var duration = "";
-
-        foreach (var line in lines)
-        {
-            var trimmed = line.Trim();
-            if (trimmed.Contains(",video"))
-            {
-                videoStreams++;
-                if (string.IsNullOrEmpty(videoCodec))
-                    videoCodec = trimmed.Split(',')[0];
-            }
-            else if (trimmed.Contains(",audio"))
-            {
-                audioStreams++;
-                if (string.IsNullOrEmpty(audioCodec))
-                    audioCodec = trimmed.Split(',')[0];
-            }
-            else if (trimmed.Contains(",subtitle"))
-            {
-                subtitleStreams++;
-            }
-            else if (char.IsDigit(trimmed[0]) && trimmed.Contains("."))
-            {
-                // This looks like a duration
-                duration = trimmed;
-            }
-        }
-
-        var parts = new List<string>();
-        if (videoStreams > 0)
-            parts.Add($"{videoStreams} video ({videoCodec})");
-        if (audioStreams > 0)
-            parts.Add($"{audioStreams} audio ({audioCodec})");
-        if (subtitleStreams > 0)
-            parts.Add($"{subtitleStreams} subtitle");
-        if (!string.IsNullOrEmpty(duration))
-            parts.Add($"{duration}s");
-
-        return parts.Count > 0 ? string.Join(", ", parts) : "Unknown format";
-    }
-
-    private static async Task StreamDataToProcessAsync(Stream source, Stream destination, int maxBytes, CancellationToken ct)
-    {
-        var buffer = new byte[8192]; // 8KB buffer
-        var totalRead = 0;
-        
-        try
-        {
-            while (totalRead < maxBytes)
-            {
-                var bytesToRead = Math.Min(buffer.Length, maxBytes - totalRead);
-                var bytesRead = await source.ReadAsync(buffer, 0, bytesToRead, ct);
-                
-                if (bytesRead == 0)
-                    break; // End of stream
-                    
-                try
-                {
-                    await destination.WriteAsync(buffer, 0, bytesRead, ct);
-                    totalRead += bytesRead;
-                }
-                catch (IOException ex) when (ex.Message.Contains("Broken pipe") || ex.InnerException is SocketException)
-                {
-                    // ffprobe closed its stdin - this is normal, it has enough data to analyze
-                    Log.Debug("ffprobe closed stdin after reading {TotalRead} bytes (this is normal)", totalRead);
-                    break;
-                }
-            }
-            
-            try
-            {
-                await destination.FlushAsync(ct);
-            }
-            catch (IOException ex) when (ex.Message.Contains("Broken pipe") || ex.InnerException is SocketException)
-            {
-                // Ignore broken pipe on flush - ffprobe already closed
-                Log.Debug("ffprobe stdin already closed during flush (this is normal)");
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.Debug(ex, "Error during streaming to ffprobe (may be normal if ffprobe closed early)");
-            // Don't rethrow - this is often normal behavior when ffprobe gets enough data
-        }
-    }
 
     private async Task HandleCorruptFileAsync(DavDatabaseClient dbClient, DavItem? davItem, string filePath, CancellationToken ct)
     {

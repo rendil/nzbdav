@@ -141,6 +141,13 @@ public class QueueItemProcessor(
             .Select(x => x!)
             .ToList();
 
+        // validate video files found (before database operations)
+        if (configManager.IsEnsureImportableVideoEnabled())
+        {
+            var validator = new EnsureImportableVideoValidator(dbClient, usenetClient);
+            await validator.ThrowIfValidationFailsAsync(ct);
+        }
+
         // update the database
         await MarkQueueItemCompleted(startTime, error: null, () =>
         {
@@ -148,10 +155,6 @@ public class QueueItemProcessor(
             var mountFolder = CreateMountFolder(categoryFolder);
             new RarAggregator(dbClient, mountFolder).UpdateDatabase(fileProcessingResults);
             new FileAggregator(dbClient, mountFolder).UpdateDatabase(fileProcessingResults);
-
-            // validate video files found
-            if (configManager.IsEnsureImportableVideoEnabled())
-                new EnsureImportableVideoValidator(dbClient).ThrowIfValidationFails();
 
             return mountFolder;
         });
