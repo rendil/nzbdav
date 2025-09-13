@@ -301,13 +301,14 @@ public class MediaIntegrityService : IDisposable
                 .Where(file => IsMediaFile(Path.GetExtension(file).ToLowerInvariant()));
 
             Log.Information("Scanning library directory for media files...");
-            var processedCount = 0;
+            var totalProcessed = 0;
             var maxFiles = _configManager.GetMaxFilesToCheckPerRun();
 
             // Resolve symlinks to DavItems and filter out recently checked files
             foreach (var filePath in allFiles)
             {
                 ct.ThrowIfCancellationRequested();
+                totalProcessed++;
                 
                 try
                 {
@@ -366,7 +367,6 @@ public class MediaIntegrityService : IDisposable
                     {
                         Log.Debug("Skipping {FilePath}: DavItem is {ItemType} (only NZB and RAR files supported for streaming integrity check)", 
                             Path.GetFileName(filePath), anyDavItem.Type);
-                        processedCount++;
                         continue;
                     }
 
@@ -392,7 +392,7 @@ public class MediaIntegrityService : IDisposable
                 }
             }
 
-            var skippedCount = processedCount - checkItems.Count;
+            var skippedCount = totalProcessed - checkItems.Count;
             Log.Information("Library scan complete: {ResolvedCount} files ready for integrity check, {SkippedCount} files skipped", 
                 checkItems.Count, skippedCount);
             

@@ -32,6 +32,12 @@ public class SonarrClient : ArrClient
 
     public override async Task<bool> DeleteFileAsync(string filePath, CancellationToken ct = default)
     {
+        var (success, seriesId) = await DeleteFileWithSeriesIdAsync(filePath, ct);
+        return success;
+    }
+
+    public async Task<(bool Success, int[]? EpisodeIds)> DeleteFileWithEpisodeIdsAsync(string filePath, CancellationToken ct = default)
+    {
         try
         {
             // First, find the episode file that matches this path
@@ -39,7 +45,7 @@ public class SonarrClient : ArrClient
             if (episodeFiles == null)
             {
                 Log.Warning("Failed to retrieve episode files from Sonarr instance '{InstanceName}'", _instanceName);
-                return false;
+                return (false, null);
             }
 
             // Try multiple matching strategies in order of preference
@@ -49,8 +55,12 @@ public class SonarrClient : ArrClient
             {
                 Log.Warning("Could not find episode file with path '{FilePath}' in Sonarr instance '{InstanceName}' using any matching strategy", 
                     filePath, _instanceName);
-                return false;
+                return (false, null);
             }
+
+            // Get the episodes associated with this episode file
+            var episodes = await GetAsync<SonarrEpisode[]>($"/api/v3/episode?episodeFileId={targetEpisodeFile.Id}", ct);
+            var episodeIds = episodes?.Select(e => e.Id).ToArray();
 
             // Delete the episode file
             var deleteEndpoint = $"/api/v3/episodefile/{targetEpisodeFile.Id}";
@@ -58,29 +68,116 @@ public class SonarrClient : ArrClient
             
             if (success)
             {
-                Log.Information("Successfully deleted episode file '{FilePath}' (ID: {FileId}) from Sonarr instance '{InstanceName}'", 
-                    filePath, targetEpisodeFile.Id, _instanceName);
-                return true;
+                Log.Information("Successfully deleted episode file '{FilePath}' (ID: {FileId}) containing {EpisodeCount} episodes from Sonarr instance '{InstanceName}'", 
+                    filePath, targetEpisodeFile.Id, episodeIds?.Length ?? 0, _instanceName);
+                return (true, episodeIds);
             }
             else
             {
                 Log.Warning("Failed to delete episode file '{FilePath}' (ID: {FileId}) from Sonarr instance '{InstanceName}'", 
                     filePath, targetEpisodeFile.Id, _instanceName);
-                return false;
+                return (false, episodeIds);
             }
         }
         catch (Exception ex)
         {
             Log.Error(ex, "Error deleting file '{FilePath}' from Sonarr instance '{InstanceName}'", 
                 filePath, _instanceName);
-            return false;
+            return (false, null);
         }
+    }
+
+    // Keep the old method for backward compatibility, but update it to use the new method
+    public async Task<(bool Success, int? SeriesId)> DeleteFileWithSeriesIdAsync(string filePath, CancellationToken ct = default)
+    {
+        var (success, episodeIds) = await DeleteFileWithEpisodeIdsAsync(filePath, ct);
+        
+        // If we have episode IDs, get the series ID from the first episode
+        if (episodeIds?.Length > 0)
+        {
+            try
+            {
+                var episode = await GetAsync<SonarrEpisode>($"/api/v3/episode/{episodeIds[0]}", ct);
+                return (success, episode?.SeriesId);
+            }
+            catch
+            {
+                return (success, null);
+            }
+        }
+        
+        return (success, null);
     }
 
     public async Task<List<SonarrSeries>> GetSeriesAsync(CancellationToken ct = default)
     {
         var series = await GetAsync<SonarrSeries[]>("/api/v3/series", ct);
         return series?.ToList() ?? new List<SonarrSeries>();
+    }
+
+    public async Task<bool> SearchForEpisodeAsync(int episodeId, CancellationToken ct = default)
+    {
+        return await SearchForEpisodesAsync(new[] { episodeId }, ct);
+    }
+
+    public async Task<bool> SearchForEpisodesAsync(int[] episodeIds, CancellationToken ct = default)
+    {
+        try
+        {
+            var command = new
+            {
+                name = "EpisodeSearch",
+                episodeIds = episodeIds
+            };
+
+            var result = await PostAsync<object>("/api/v3/command", command, ct);
+            if (result != null)
+            {
+                Log.Information("Successfully triggered search for {EpisodeCount} episode(s) (IDs: {EpisodeIds}) in Sonarr instance '{InstanceName}'", 
+                    episodeIds.Length, string.Join(", ", episodeIds), _instanceName);
+                return true;
+            }
+
+            Log.Warning("Failed to trigger search for {EpisodeCount} episode(s) (IDs: {EpisodeIds}) in Sonarr instance '{InstanceName}' - no response", 
+                episodeIds.Length, string.Join(", ", episodeIds), _instanceName);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Error triggering search for {EpisodeCount} episode(s) (IDs: {EpisodeIds}) in Sonarr instance '{InstanceName}'", 
+                episodeIds.Length, string.Join(", ", episodeIds), _instanceName);
+            return false;
+        }
+    }
+
+    public async Task<bool> SearchForSeriesAsync(int seriesId, CancellationToken ct = default)
+    {
+        try
+        {
+            var command = new
+            {
+                name = "SeriesSearch",
+                seriesId = seriesId
+            };
+
+            var result = await PostAsync<object>("/api/v3/command", command, ct);
+            if (result != null)
+            {
+                Log.Information("Successfully triggered search for series ID {SeriesId} in Sonarr instance '{InstanceName}'", 
+                    seriesId, _instanceName);
+                return true;
+            }
+
+            Log.Warning("Failed to trigger search for series ID {SeriesId} in Sonarr instance '{InstanceName}' - no response", 
+                seriesId, _instanceName);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Error triggering search for series ID {SeriesId} in Sonarr instance '{InstanceName}'", 
+                seriesId, _instanceName);
+            return false;
+        }
     }
 
     public async Task<List<SonarrEpisodeFile>> GetEpisodeFilesAsync(CancellationToken ct = default)
@@ -284,6 +381,30 @@ public class SonarrSeries
 
     [JsonPropertyName("statistics")]
     public SonarrSeriesStatistics? Statistics { get; set; }
+}
+
+public class SonarrEpisode
+{
+    [JsonPropertyName("id")]
+    public int Id { get; set; }
+
+    [JsonPropertyName("seriesId")]
+    public int SeriesId { get; set; }
+
+    [JsonPropertyName("seasonNumber")]
+    public int SeasonNumber { get; set; }
+
+    [JsonPropertyName("episodeNumber")]
+    public int EpisodeNumber { get; set; }
+
+    [JsonPropertyName("title")]
+    public string Title { get; set; } = string.Empty;
+
+    [JsonPropertyName("hasFile")]
+    public bool HasFile { get; set; }
+
+    [JsonPropertyName("episodeFileId")]
+    public int? EpisodeFileId { get; set; }
 }
 
 public class SonarrEpisodeFile

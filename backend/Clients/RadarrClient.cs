@@ -32,6 +32,12 @@ public class RadarrClient : ArrClient
 
     public override async Task<bool> DeleteFileAsync(string filePath, CancellationToken ct = default)
     {
+        var (success, movieId) = await DeleteFileWithMovieIdAsync(filePath, ct);
+        return success;
+    }
+
+    public async Task<(bool Success, int? MovieId)> DeleteFileWithMovieIdAsync(string filePath, CancellationToken ct = default)
+    {
         try
         {
             // First, find the movie that contains this file
@@ -39,7 +45,7 @@ public class RadarrClient : ArrClient
             if (movies == null)
             {
                 Log.Warning("Failed to retrieve movies from Radarr instance '{InstanceName}'", _instanceName);
-                return false;
+                return (false, null);
             }
 
             // Log all movie file paths for debugging
@@ -59,7 +65,7 @@ public class RadarrClient : ArrClient
             {
                 Log.Warning("Could not find movie with file path '{FilePath}' in Radarr instance '{InstanceName}' using any matching strategy", 
                     filePath, _instanceName);
-                return false;
+                return (false, null);
             }
 
             // Delete the movie file
@@ -72,25 +78,25 @@ public class RadarrClient : ArrClient
                 {
                     Log.Information("Successfully deleted movie file '{FilePath}' (ID: {FileId}) from Radarr instance '{InstanceName}'", 
                         filePath, targetMovie.MovieFile.Id, _instanceName);
-                    return true;
+                    return (true, targetMovie.Id);
                 }
                 else
                 {
                     Log.Warning("Failed to delete movie file '{FilePath}' (ID: {FileId}) from Radarr instance '{InstanceName}'", 
                         filePath, targetMovie.MovieFile.Id, _instanceName);
-                    return false;
+                    return (false, targetMovie.Id);
                 }
             }
 
             Log.Warning("Movie found but no file ID available for '{FilePath}' in Radarr instance '{InstanceName}'", 
                 filePath, _instanceName);
-            return false;
+            return (false, targetMovie.Id);
         }
         catch (Exception ex)
         {
             Log.Error(ex, "Error deleting file '{FilePath}' from Radarr instance '{InstanceName}'", 
                 filePath, _instanceName);
-            return false;
+            return (false, null);
         }
     }
 
@@ -98,6 +104,36 @@ public class RadarrClient : ArrClient
     {
         var movies = await GetAsync<RadarrMovie[]>("/api/v3/movie", ct);
         return movies?.ToList() ?? new List<RadarrMovie>();
+    }
+
+    public async Task<bool> SearchForMovieAsync(int movieId, CancellationToken ct = default)
+    {
+        try
+        {
+            var command = new
+            {
+                name = "MoviesSearch",
+                movieIds = new[] { movieId }
+            };
+
+            var result = await PostAsync<object>("/api/v3/command", command, ct);
+            if (result != null)
+            {
+                Log.Information("Successfully triggered search for movie ID {MovieId} in Radarr instance '{InstanceName}'", 
+                    movieId, _instanceName);
+                return true;
+            }
+
+            Log.Warning("Failed to trigger search for movie ID {MovieId} in Radarr instance '{InstanceName}' - no response", 
+                movieId, _instanceName);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Error triggering search for movie ID {MovieId} in Radarr instance '{InstanceName}'", 
+                movieId, _instanceName);
+            return false;
+        }
     }
 
     private RadarrMovie? FindMovieByPath(RadarrMovie[] movies, string filePath)

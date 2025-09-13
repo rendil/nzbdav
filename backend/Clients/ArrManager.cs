@@ -51,17 +51,27 @@ public class ArrManager : IDisposable
             {
                 try
                 {
-                    var success = await radarrClient.DeleteFileAsync(filePath, ct);
+                    var (success, movieId) = await radarrClient.DeleteFileWithMovieIdAsync(filePath, ct);
                     if (success)
                     {
-                        Log.Information("Successfully deleted file '{FilePath}' via Radarr instance", filePath);
+                        Log.Information("Successfully deleted file '{FilePath}' via Radarr instance '{InstanceName}'", 
+                            filePath, radarrClient.InstanceName);
                         anySuccess = true;
+                        
+                        // Trigger search for replacement if we have a movie ID
+                        if (movieId.HasValue)
+                        {
+                            Log.Information("Triggering search for replacement movie (ID: {MovieId}) in Radarr instance '{InstanceName}'", 
+                                movieId.Value, radarrClient.InstanceName);
+                            await radarrClient.SearchForMovieAsync(movieId.Value, ct);
+                        }
                         // Don't break here - the file might exist in multiple instances
                     }
                 }
                 catch (Exception ex)
                 {
-                    Log.Warning(ex, "Failed to delete file '{FilePath}' via Radarr instance", filePath);
+                    Log.Warning(ex, "Failed to delete file '{FilePath}' via Radarr instance '{InstanceName}'", 
+                        filePath, radarrClient.InstanceName);
                 }
             }
 
@@ -70,17 +80,27 @@ public class ArrManager : IDisposable
             {
                 try
                 {
-                    var success = await sonarrClient.DeleteFileAsync(filePath, ct);
+                    var (success, episodeIds) = await sonarrClient.DeleteFileWithEpisodeIdsAsync(filePath, ct);
                     if (success)
                     {
-                        Log.Information("Successfully deleted file '{FilePath}' via Sonarr instance", filePath);
+                        Log.Information("Successfully deleted file '{FilePath}' via Sonarr instance '{InstanceName}'", 
+                            filePath, sonarrClient.InstanceName);
                         anySuccess = true;
+                        
+                        // Trigger search for replacement if we have episode IDs
+                        if (episodeIds?.Length > 0)
+                        {
+                            Log.Information("Triggering search for replacement episodes (IDs: {EpisodeIds}) in Sonarr instance '{InstanceName}'", 
+                                string.Join(", ", episodeIds), sonarrClient.InstanceName);
+                            await sonarrClient.SearchForEpisodesAsync(episodeIds, ct);
+                        }
                         // Don't break here - the file might exist in multiple instances
                     }
                 }
                 catch (Exception ex)
                 {
-                    Log.Warning(ex, "Failed to delete file '{FilePath}' via Sonarr instance", filePath);
+                    Log.Warning(ex, "Failed to delete file '{FilePath}' via Sonarr instance '{InstanceName}'", 
+                        filePath, sonarrClient.InstanceName);
                 }
             }
 
