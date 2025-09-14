@@ -166,7 +166,7 @@ public class QueueItemProcessor(
         if (configManager.IsEnsureImportableVideoEnabled())
         {
             Log.Information("Video validation is enabled, starting validation for job: {JobName}", queueItem.JobName);
-            var validator = new EnsureImportableVideoValidator(dbClient, usenetClient);
+            var validator = new EnsureImportableVideoValidator(dbClient, usenetClient, configManager);
             await validator.ThrowIfValidationFailsAsync(ct);
         }
         else

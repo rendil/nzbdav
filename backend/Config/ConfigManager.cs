@@ -179,6 +179,13 @@ public class ConfigManager
         return false; // Default to disabled for safety
     }
 
+    public bool IsMp4DeepScanEnabled()
+    {
+        if (bool.TryParse(GetConfigValue("integrity.mp4_deep_scan"), out var enabled))
+            return enabled;
+        return false; // Default to disabled for performance
+    }
+
     public class ConfigEventArgs : EventArgs
     {
         public Dictionary<string, string> ChangedConfig { get; set; } = new();

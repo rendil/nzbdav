@@ -13,16 +13,17 @@ public static class FfprobeUtil
     /// </summary>
     /// <param name="stream">The stream to analyze</param>
     /// <param name="filePath">Optional file path for logging purposes</param>
+    /// <param name="enableMp4DeepScan">Whether to use the slower but more thorough MP4 stdin workaround</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>True if the stream contains valid media content, false if corrupt or invalid</returns>
-    public static async Task<bool> IsValidMediaStreamAsync(Stream stream, string? filePath = null, CancellationToken ct = default)
+    public static async Task<bool> IsValidMediaStreamAsync(Stream stream, string? filePath = null, bool enableMp4DeepScan = false, CancellationToken ct = default)
     {
+        // Check if this is an MP4 file that might need the stdin workaround
+        var isMp4File = !string.IsNullOrEmpty(filePath) && IsMp4File(filePath);
+        
         try
         {
-            // Check if this is an MP4 file that might need the stdin workaround
-            var isMp4File = !string.IsNullOrEmpty(filePath) && IsMp4File(filePath);
-            
-            if (isMp4File)
+            if (isMp4File && enableMp4DeepScan)
             {
                 Log.Debug("MP4 file detected, using ffprobe stdin workaround for {FilePath}", filePath);
                 return await AnalyzeMp4WithStdinAsync(stream, filePath, ct);
@@ -31,7 +32,7 @@ public static class FfprobeUtil
             {
                 Log.Debug("Analyzing media stream using FFMpegCore for {FilePath}", filePath ?? "unknown file");
                 
-                // Use FFMpegCore to analyze the entire stream for non-MP4 files
+                // Use FFMpegCore to analyze the entire stream
                 var mediaInfo = await FFProbe.AnalyseAsync(stream, cancellationToken: ct);
                 
                 // Check if we have any video or audio streams
@@ -53,6 +54,14 @@ public static class FfprobeUtil
                     return false;
                 }
             }
+        }
+        catch (Exception ex) when (isMp4File && !enableMp4DeepScan && IsMoovAtomError(ex))
+        {
+            // For MP4 files with moov atom issues, log but don't consider corrupt when deep scan is disabled
+            Log.Information("MP4 file {FilePath} has moov atom issues but MP4 deep scan is disabled - considering valid. " +
+                           "Enable 'MP4 Deep Scan' in settings for thorough validation. Error: {Error}", 
+                           filePath, ex.Message);
+            return true;
         }
         catch (Exception ex)
         {
@@ -100,6 +109,17 @@ public static class FfprobeUtil
     {
         var extension = Path.GetExtension(filePath).ToLowerInvariant();
         return extension is ".mp4" or ".m4v" or ".mov" or ".3gp" or ".3g2";
+    }
+
+    /// <summary>
+    /// Checks if an exception is related to moov atom issues in MP4 files
+    /// </summary>
+    private static bool IsMoovAtomError(Exception ex)
+    {
+        var message = ex.Message?.ToLowerInvariant() ?? "";
+        return message.Contains("moov atom not found") || 
+               message.Contains("invalid data found when processing input") ||
+               message.Contains("could not find codec parameters");
     }
 
     /// <summary>

@@ -505,7 +505,8 @@ public class MediaIntegrityService : IDisposable
             }
             
             // Use FFMpegCore to analyze the entire stream for media integrity
-            var isValid = await FfprobeUtil.IsValidMediaStreamAsync(stream, davItem.Path, ct: ct);
+            var enableMp4DeepScan = _configManager.IsMp4DeepScanEnabled();
+            var isValid = await FfprobeUtil.IsValidMediaStreamAsync(stream, davItem.Path, enableMp4DeepScan, ct);
             
             // Clean up the stream
             await stream.DisposeAsync();

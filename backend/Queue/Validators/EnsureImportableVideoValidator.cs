@@ -1,5 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using NzbWebDAV.Clients;
+using NzbWebDAV.Config;
 using NzbWebDAV.Database;
 using NzbWebDAV.Database.Models;
 using NzbWebDAV.Exceptions;
@@ -9,7 +10,7 @@ using Serilog;
 
 namespace NzbWebDAV.Queue.Validators;
 
-public class EnsureImportableVideoValidator(DavDatabaseClient dbClient, UsenetStreamingClient usenetClient)
+public class EnsureImportableVideoValidator(DavDatabaseClient dbClient, UsenetStreamingClient usenetClient, ConfigManager configManager)
 {
     public async Task ThrowIfValidationFailsAsync(CancellationToken ct = default)
     {
@@ -157,7 +158,8 @@ public class EnsureImportableVideoValidator(DavDatabaseClient dbClient, UsenetSt
             }
 
             // Use FFMpegCore to analyze the entire stream for better accuracy
-            var isValid = await FfprobeUtil.IsValidMediaStreamAsync(stream, videoFile.Name, ct);
+            var enableMp4DeepScan = configManager.IsMp4DeepScanEnabled();
+            var isValid = await FfprobeUtil.IsValidMediaStreamAsync(stream, videoFile.Name, enableMp4DeepScan, ct);
             await stream.DisposeAsync();
             
             return isValid;

@@ -35,6 +35,7 @@ const defaultConfig = {
     "integrity.max_files_per_run": "100",
     "integrity.corrupt_file_action": "log",
     "integrity.direct_deletion_fallback": "false",
+    "integrity.mp4_deep_scan": "false",
 }
 
 const advancedTabs = ["library", "integrity", "arr", "maintenance"];

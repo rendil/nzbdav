@@ -221,6 +221,22 @@ export function IntegritySettings({ config, setNewConfig }: IntegritySettingsPro
 
             <hr />
 
+            <Form.Group>
+                <Form.Check
+                    type="checkbox"
+                    id="mp4-deep-scan-checkbox"
+                    label="Enable MP4 deep scan"
+                    checked={config["integrity.mp4_deep_scan"] === "true"}
+                    onChange={e => setNewConfig({ ...config, "integrity.mp4_deep_scan": e.target.checked ? "true" : "false" })}
+                />
+                <Form.Text muted>
+                    When enabled, MP4 files use a slower but more thorough validation method that can detect moov atom issues. 
+                    Disable for faster validation if you don't have MP4 corruption issues.
+                </Form.Text>
+            </Form.Group>
+
+            <hr />
+
             <div className={styles.task}>
                 <Form.Group>
                     <Form.Label className={styles.title}>Manual Integrity Check</Form.Label>
@@ -270,5 +286,6 @@ export function isIntegritySettingsUpdated(config: Record<string, string>, newCo
         || config["integrity.interval_days"] !== newConfig["integrity.interval_days"]
         || config["integrity.max_files_per_run"] !== newConfig["integrity.max_files_per_run"]
         || config["integrity.corrupt_file_action"] !== newConfig["integrity.corrupt_file_action"]
-        || config["integrity.direct_deletion_fallback"] !== newConfig["integrity.direct_deletion_fallback"];
+        || config["integrity.direct_deletion_fallback"] !== newConfig["integrity.direct_deletion_fallback"]
+        || config["integrity.mp4_deep_scan"] !== newConfig["integrity.mp4_deep_scan"];
 }
