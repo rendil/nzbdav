@@ -1,4 +1,5 @@
 ﻿using System.Security.Claims;
+using FFMpegCore;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting;
@@ -41,6 +42,9 @@ class Program
             .MinimumLevel.Override("Microsoft.AspNetCore.DataProtection", LogEventLevel.Error)
             .WriteTo.Console(theme: AnsiConsoleTheme.Code)
             .CreateLogger();
+
+        // Configure FFMpegCore to use the ffprobe binary installed in the container
+        GlobalFFOptions.Configure(new FFOptions { BinaryFolder = "/usr/bin" });
 
         // initialize database
         await using var databaseContext = new DavDatabaseContext();
