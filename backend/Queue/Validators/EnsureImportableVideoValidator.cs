@@ -53,8 +53,8 @@ public class EnsureImportableVideoValidator(DavDatabaseClient dbClient, UsenetSt
         // Log the files we found for debugging
         foreach (var file in videoFiles)
         {
-            Log.Debug("Found potential video file: {FileName} (Type: {ItemType}, Size: {FileSize})", 
-                file.Name, file.Type, file.FileSize);
+            Log.Information("📁 Found potential video file: {FileName} (Type: {ItemType}, Size: {FileSize} bytes, Extension: {Extension})", 
+                file.Name, file.Type, file.FileSize, Path.GetExtension(file.Name).ToLowerInvariant());
         }
 
         // Check each video file with ffprobe to ensure it's actually valid video content
@@ -83,15 +83,34 @@ public class EnsureImportableVideoValidator(DavDatabaseClient dbClient, UsenetSt
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "❌ Error validating video file: {FileName} - assuming valid to avoid false negatives", videoFile.Name);
-                // If we can't validate, assume it's valid to avoid false negatives
-                validVideoCount++;
+                Log.Error(ex, "❌ Error validating video file: {FileName} - treating as INVALID due to validation failure", videoFile.Name);
+                // If we can't validate due to errors, treat as invalid to prevent false positives
+                // This is more conservative but prevents downloads that Radarr can't import
             }
         }
 
         var hasValidVideos = validVideoCount > 0;
-        Log.Information("Video validation complete: {ValidCount}/{TotalCount} files contain valid video content", 
-            validVideoCount, videoFiles.Count);
+        
+        if (hasValidVideos)
+        {
+            Log.Information("✅ Video validation PASSED: {ValidCount}/{TotalCount} files contain valid video content", 
+                validVideoCount, videoFiles.Count);
+        }
+        else
+        {
+            Log.Error("❌ Video validation FAILED: {ValidCount}/{TotalCount} files contain valid video content - no importable videos found", 
+                validVideoCount, videoFiles.Count);
+            
+            // Log specific reasons for failure
+            if (videoFiles.Count == 0)
+            {
+                Log.Error("   Reason: No video files found by filename extension");
+            }
+            else
+            {
+                Log.Error("   Reason: All {FileCount} video files failed ffprobe validation or had missing articles", videoFiles.Count);
+            }
+        }
 
         return hasValidVideos;
     }
@@ -137,8 +156,8 @@ public class EnsureImportableVideoValidator(DavDatabaseClient dbClient, UsenetSt
                 return true; // Assume valid for unsupported types
             }
 
-            // Use smaller sample sizes for download validation (2MB then 10MB for speed, MP4: start+end)
-            var isValid = await FfprobeUtil.IsValidMediaStreamAsync(stream, videoFile.Name, 2 * 1024 * 1024, 10 * 1024 * 1024, ct);
+            // Use more thorough sample sizes for download validation (5MB then 25MB for better accuracy)
+            var isValid = await FfprobeUtil.IsValidMediaStreamAsync(stream, videoFile.Name, 5 * 1024 * 1024, 25 * 1024 * 1024, ct);
             await stream.DisposeAsync();
             
             return isValid;
