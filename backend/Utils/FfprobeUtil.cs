@@ -128,14 +128,37 @@ public static class FfprobeUtil
                 return false;
             }
 
-            // Copy the stream data to ffprobe's stdin
-            var copyTask = stream.CopyToAsync(process.StandardInput.BaseStream, ct);
+            // Copy the stream data to ffprobe's stdin and close it when done
+            try
+            {
+                await stream.CopyToAsync(process.StandardInput.BaseStream, ct);
+            }
+            catch (ObjectDisposedException)
+            {
+                // ffprobe closed stdin early - this is normal behavior
+                Log.Debug("ffprobe closed stdin early for MP4 file {FilePath} - this is normal", filePath);
+            }
+            catch (IOException ex) when (ex.Message.Contains("Broken pipe") || ex.Message.Contains("Pipe is broken"))
+            {
+                // ffprobe closed stdin early - this is normal behavior
+                Log.Debug("ffprobe closed stdin pipe early for MP4 file {FilePath} - this is normal", filePath);
+            }
             
-            // Close stdin to signal end of input
-            process.StandardInput.Close();
+            // Try to close stdin gracefully
+            try
+            {
+                process.StandardInput.Close();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Already closed - ignore
+            }
+            catch (IOException)
+            {
+                // Pipe already closed - ignore
+            }
             
-            // Wait for the copy and process to complete
-            await copyTask;
+            // Wait for the process to complete
             await process.WaitForExitAsync(ct);
 
             // Read the output
