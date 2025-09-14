@@ -3,6 +3,13 @@ using Serilog;
 
 namespace NzbWebDAV.Clients;
 
+public enum ContentType
+{
+    Unknown,
+    Movie,
+    TvShow
+}
+
 public class ArrManager : IDisposable
 {
     private readonly ConfigManager _configManager;
@@ -45,68 +52,88 @@ public class ArrManager : IDisposable
         try
         {
             var anySuccess = false;
+            var contentType = DetectContentType(filePath);
 
-            // Try Radarr instances first (for movies)
-            foreach (var radarrClient in _radarrClients)
+            Log.Debug("Detected content type '{ContentType}' for file: {FilePath}", contentType, filePath);
+
+            if (contentType == ContentType.Movie || contentType == ContentType.Unknown)
             {
-                try
+                // Try Radarr instances (for movies and unknown content)
+                foreach (var radarrClient in _radarrClients)
                 {
-                    var (success, movieId) = await radarrClient.DeleteFileWithMovieIdAsync(filePath, ct);
-                    if (success)
+                    try
                     {
-                        Log.Information("Successfully deleted file '{FilePath}' via Radarr instance '{InstanceName}'", 
-                            filePath, radarrClient.InstanceName);
-                        anySuccess = true;
-                        
-                        // Trigger search for replacement if we have a movie ID
-                        if (movieId.HasValue)
+                        var (success, movieId) = await radarrClient.DeleteFileWithMovieIdAsync(filePath, ct);
+                        if (success)
                         {
-                            Log.Information("Triggering search for replacement movie (ID: {MovieId}) in Radarr instance '{InstanceName}'", 
-                                movieId.Value, radarrClient.InstanceName);
-                            await radarrClient.SearchForMovieAsync(movieId.Value, ct);
+                            Log.Information("Successfully deleted file '{FilePath}' via Radarr instance '{InstanceName}'", 
+                                filePath, radarrClient.InstanceName);
+                            anySuccess = true;
+                            
+                            // Trigger search for replacement if we have a movie ID
+                            if (movieId.HasValue)
+                            {
+                                Log.Information("Triggering search for replacement movie (ID: {MovieId}) in Radarr instance '{InstanceName}'", 
+                                    movieId.Value, radarrClient.InstanceName);
+                                await radarrClient.SearchForMovieAsync(movieId.Value, ct);
+                            }
+                            // Don't break here - the file might exist in multiple instances
                         }
-                        // Don't break here - the file might exist in multiple instances
                     }
-                }
-                catch (Exception ex)
-                {
-                    Log.Warning(ex, "Failed to delete file '{FilePath}' via Radarr instance '{InstanceName}'", 
-                        filePath, radarrClient.InstanceName);
+                    catch (Exception ex)
+                    {
+                        Log.Warning(ex, "Failed to delete file '{FilePath}' via Radarr instance '{InstanceName}'", 
+                            filePath, radarrClient.InstanceName);
+                    }
                 }
             }
 
-            // Try Sonarr instances (for TV shows)
-            foreach (var sonarrClient in _sonarrClients)
+            if (contentType == ContentType.TvShow || contentType == ContentType.Unknown)
             {
-                try
+                // Try Sonarr instances (for TV shows and unknown content)
+                foreach (var sonarrClient in _sonarrClients)
                 {
-                    var (success, episodeIds) = await sonarrClient.DeleteFileWithEpisodeIdsAsync(filePath, ct);
-                    if (success)
+                    try
                     {
-                        Log.Information("Successfully deleted file '{FilePath}' via Sonarr instance '{InstanceName}'", 
-                            filePath, sonarrClient.InstanceName);
-                        anySuccess = true;
-                        
-                        // Trigger search for replacement if we have episode IDs
-                        if (episodeIds?.Length > 0)
+                        var (success, episodeIds) = await sonarrClient.DeleteFileWithEpisodeIdsAsync(filePath, ct);
+                        if (success)
                         {
-                            Log.Information("Triggering search for replacement episodes (IDs: {EpisodeIds}) in Sonarr instance '{InstanceName}'", 
-                                string.Join(", ", episodeIds), sonarrClient.InstanceName);
-                            await sonarrClient.SearchForEpisodesAsync(episodeIds, ct);
+                            Log.Information("Successfully deleted file '{FilePath}' via Sonarr instance '{InstanceName}'", 
+                                filePath, sonarrClient.InstanceName);
+                            anySuccess = true;
+                            
+                            // Trigger search for replacement if we have episode IDs
+                            if (episodeIds?.Length > 0)
+                            {
+                                Log.Information("Triggering search for replacement episodes (IDs: {EpisodeIds}) in Sonarr instance '{InstanceName}'", 
+                                    string.Join(", ", episodeIds), sonarrClient.InstanceName);
+                                await sonarrClient.SearchForEpisodesAsync(episodeIds, ct);
+                            }
+                            // Don't break here - the file might exist in multiple instances
                         }
-                        // Don't break here - the file might exist in multiple instances
                     }
-                }
-                catch (Exception ex)
-                {
-                    Log.Warning(ex, "Failed to delete file '{FilePath}' via Sonarr instance '{InstanceName}'", 
-                        filePath, sonarrClient.InstanceName);
+                    catch (Exception ex)
+                    {
+                        // Only log at Warning level if we specifically detected this as a TV show
+                        var logLevel = contentType == ContentType.TvShow ? "Warning" : "Debug";
+                        if (logLevel == "Warning")
+                        {
+                            Log.Warning(ex, "Failed to delete file '{FilePath}' via Sonarr instance '{InstanceName}'", 
+                                filePath, sonarrClient.InstanceName);
+                        }
+                        else
+                        {
+                            Log.Debug(ex, "Failed to delete file '{FilePath}' via Sonarr instance '{InstanceName}' - likely a movie file", 
+                                filePath, sonarrClient.InstanceName);
+                        }
+                    }
                 }
             }
 
             if (!anySuccess)
             {
-                Log.Warning("File '{FilePath}' was not found in any configured Radarr or Sonarr instances", filePath);
+                Log.Warning("File '{FilePath}' was not found in any configured {ServiceTypes} instances", 
+                    filePath, GetServiceTypesString(contentType));
             }
 
             return anySuccess;
@@ -236,6 +263,71 @@ public class ArrManager : IDisposable
         instances.AddRange(_sonarrClients.Select(c => $"Sonarr: {c.InstanceName}"));
         
         return instances;
+    }
+
+    private ContentType DetectContentType(string filePath)
+    {
+        // Normalize the path for analysis
+        var normalizedPath = filePath.Replace('\\', '/').ToLowerInvariant();
+        
+        // Common TV show patterns
+        var tvPatterns = new[]
+        {
+            @"/tv/",
+            @"/shows/",
+            @"/series/",
+            @"/television/",
+            @"s\d{1,2}e\d{1,2}",     // S01E01 pattern
+            @"season\s*\d+",          // Season 1 pattern
+            @"\d{1,2}x\d{1,2}",      // 1x01 pattern
+            @"episode\s*\d+",         // Episode pattern
+        };
+        
+        // Common movie patterns
+        var moviePatterns = new[]
+        {
+            @"/movies/",
+            @"/films/",
+            @"/cinema/",
+            @"\(\d{4}\)",             // (2023) year pattern
+            @"\.\d{4}\.",             // .2023. year pattern
+            @"bluray",
+            @"brrip",
+            @"webrip",
+            @"dvdrip"
+        };
+        
+        // Check for TV show patterns
+        foreach (var pattern in tvPatterns)
+        {
+            if (System.Text.RegularExpressions.Regex.IsMatch(normalizedPath, pattern))
+            {
+                return ContentType.TvShow;
+            }
+        }
+        
+        // Check for movie patterns
+        foreach (var pattern in moviePatterns)
+        {
+            if (System.Text.RegularExpressions.Regex.IsMatch(normalizedPath, pattern))
+            {
+                return ContentType.Movie;
+            }
+        }
+        
+        // Default to unknown if we can't determine
+        return ContentType.Unknown;
+    }
+    
+    private string GetServiceTypesString(ContentType contentType)
+    {
+        return contentType switch
+        {
+            ContentType.Movie => "Radarr",
+            ContentType.TvShow => "Sonarr", 
+            ContentType.Unknown => "Radarr/Sonarr",
+            _ => "Radarr/Sonarr"
+        };
     }
 
     public void Dispose()

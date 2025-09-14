@@ -44,7 +44,7 @@ public class SonarrClient : ArrClient
             var episodeFiles = await GetAsync<SonarrEpisodeFile[]>("/api/v3/episodefile", ct);
             if (episodeFiles == null)
             {
-                Log.Warning("Failed to retrieve episode files from Sonarr instance '{InstanceName}'", _instanceName);
+                Log.Debug("Failed to retrieve episode files from Sonarr instance '{InstanceName}' - this is normal if the file is a movie", _instanceName);
                 return (false, null);
             }
 

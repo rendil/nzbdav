@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using Serilog;
+using Serilog.Events;
 
 namespace NzbWebDAV.Clients;
 
@@ -34,7 +35,9 @@ public abstract class ArrClient : IDisposable
             
             if (!response.IsSuccessStatusCode)
             {
-                Log.Warning("Failed to GET {Url}: {StatusCode} {ReasonPhrase}", 
+                // Use Debug level for BadRequest as it's often expected when querying the wrong service type
+                var logLevel = response.StatusCode == System.Net.HttpStatusCode.BadRequest ? LogEventLevel.Debug : LogEventLevel.Warning;
+                Log.Write(logLevel, "Failed to GET {Url}: {StatusCode} {ReasonPhrase}", 
                     url, response.StatusCode, response.ReasonPhrase);
                 return default;
             }
