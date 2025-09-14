@@ -5,6 +5,7 @@ using NzbWebDAV.Clients;
 using NzbWebDAV.Config;
 using NzbWebDAV.Database;
 using NzbWebDAV.Database.Models;
+using NzbWebDAV.Exceptions;
 using NzbWebDAV.Streams;
 using NzbWebDAV.Utils;
 using NzbWebDAV.WebDav;
@@ -521,6 +522,14 @@ public class MediaIntegrityService : IDisposable
             }
             
             return isCorrupt;
+        }
+        catch (UsenetArticleNotFoundException ex)
+        {
+            Log.Warning("Missing usenet articles detected for {FilePath}: {Message}", davItem.Path, ex.Message);
+            
+            // Missing articles mean the file is definitely corrupt/incomplete
+            // This is similar to how the download process handles missing articles
+            return true; // Mark as corrupt
         }
         catch (Exception ex)
         {

@@ -75,6 +75,12 @@ public class EnsureImportableVideoValidator(DavDatabaseClient dbClient, UsenetSt
                     Log.Warning("❌ Video file validation FAILED: {FileName} - not valid media content", videoFile.Name);
                 }
             }
+            catch (UsenetArticleNotFoundException ex)
+            {
+                Log.Warning("❌ Missing usenet articles for video file: {FileName} - {Message}", videoFile.Name, ex.Message);
+                // Missing articles mean the file is incomplete/corrupt, don't count as valid
+                // This is consistent with how the download process handles missing articles
+            }
             catch (Exception ex)
             {
                 Log.Error(ex, "❌ Error validating video file: {FileName} - assuming valid to avoid false negatives", videoFile.Name);
