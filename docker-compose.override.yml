@@ -20,10 +20,10 @@ services:
       - PUID=1000
       - PGID=1000
     volumes:
-      # Add FUSE mount point (if not already in your main compose file)
-      - nzbwebdav-fuse:/mnt/nzbwebdav
-      - /root/nzbdav:/config
-      - /data/streaming:/data/streaming
+      # Add FUSE mount point (using bind mount for NFS sharing)
+      - ./fuse-mount:/mnt/nzbwebdav:shared
+      - ./config:/config
+      # - /data/streaming:/data/streaming  # Comment out until path is configured
     privileged: true # Required for FUSE operations
     devices:
       - /dev/fuse:/dev/fuse
@@ -49,8 +49,8 @@ services:
       # - "32767:32767"
       # - "32767:32767/udp"
     volumes:
-      # Mount the same volume as nzbwebdav (read-only for safety)
-      - nzbwebdav-fuse:/nzbwebdav:ro
+      # Mount the same directory as nzbwebdav (read-only for safety)
+      - ./fuse-mount:/nzbwebdav:ro
       # NFS exports configuration
       - ./nfs-exports.txt:/etc/exports:ro
     environment:
@@ -67,6 +67,7 @@ services:
       retries: 3
       start_period: 10s
 
-volumes:
-  nzbwebdav-fuse:
-    driver: local
+# volumes:
+  # nzbwebdav-fuse:
+    # driver: local
+# Using bind mounts instead of Docker volumes for FUSE sharing
