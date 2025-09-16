@@ -15,10 +15,10 @@ services:
       - "8080:8080"
     environment:
       # Enable FUSE filesystem
-      FUSE_ENABLED: "true"
-      FUSE_MOUNT_POINT: "/mnt/nzbwebdav"
-      PUID=1000
-      PGID=1000
+      - FUSE_ENABLED: "true"
+      - FUSE_MOUNT_POINT: "/mnt/nzbwebdav"
+      - PUID=1000
+      - PGID=1000
     volumes:
       # Add FUSE mount point (if not already in your main compose file)
       - fuse-mount:/mnt/nzbwebdav
