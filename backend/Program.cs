@@ -20,6 +20,7 @@ using NzbWebDAV.Utils;
 using NzbWebDAV.WebDav;
 using NzbWebDAV.WebDav.Base;
 using NzbWebDAV.Websocket;
+using NzbWebDAV.Fuse;
 using Serilog;
 using Serilog.Events;
 using Serilog.Sinks.SystemConsole.Themes;
@@ -82,8 +83,16 @@ class Program
             .AddScoped<DatabaseStore>()
             .AddScoped<IStore, DatabaseStore>()
             .AddScoped<GetAndHeadHandlerPatch>()
-            .AddScoped<SabApiController>()
-            .AddNWebDav(opts =>
+            .AddScoped<SabApiController>();
+
+        // Add FUSE service if enabled
+        if (configManager.IsFuseEnabled())
+        {
+            builder.Services.AddHostedService<FuseService>();
+            Log.Information("FUSE filesystem service enabled");
+        }
+
+        builder.Services.AddNWebDav(opts =>
             {
                 opts.Handlers["GET"] = typeof(GetAndHeadHandlerPatch);
                 opts.Handlers["HEAD"] = typeof(GetAndHeadHandlerPatch);

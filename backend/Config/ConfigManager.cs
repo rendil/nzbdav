@@ -186,6 +186,25 @@ public class ConfigManager
         return false; // Default to disabled for performance
     }
 
+    public bool IsFuseEnabled()
+    {
+        var configValue = StringUtil.EmptyToNull(GetConfigValue("fuse.enabled"));
+        var envValue = StringUtil.EmptyToNull(Environment.GetEnvironmentVariable("FUSE_ENABLED"));
+        
+        if (configValue != null)
+            return configValue.ToLowerInvariant() == "true";
+        if (envValue != null)
+            return envValue.ToLowerInvariant() == "true";
+        
+        return false; // Default to disabled
+    }
+
+    public string? GetFuseMountPoint()
+    {
+        return StringUtil.EmptyToNull(GetConfigValue("fuse.mount-point"))
+               ?? StringUtil.EmptyToNull(Environment.GetEnvironmentVariable("FUSE_MOUNT_POINT"));
+    }
+
     public class ConfigEventArgs : EventArgs
     {
         public Dictionary<string, string> ChangedConfig { get; set; } = new();

@@ -1,0 +1,67 @@
+# Docker Compose override for adding FUSE and NFS support
+# This file extends your existing docker-compose.yml
+#
+# Usage:
+# 1. Ensure your main docker-compose.yml exists
+# 2. Run: docker-compose -f docker-compose.yml -f docker-compose.override.yml up
+#
+# Or rename this file to docker-compose.override.yml to have it automatically included
+
+version: "3.8"
+
+services:
+  # Extend your existing nzbwebdav service
+  nzbwebdav:
+    environment:
+      # Enable FUSE filesystem
+      FUSE_ENABLED: "true"
+      FUSE_MOUNT_POINT: "/mnt/nzbwebdav"
+    volumes:
+      # Add FUSE mount point (if not already in your main compose file)
+      - fuse-mount:/mnt/nzbwebdav:shared
+    privileged: true # Required for FUSE operations
+    devices:
+      - /dev/fuse:/dev/fuse
+    cap_add:
+      - SYS_ADMIN
+
+  # NFS server to share the FUSE-mounted content
+  nfs-server:
+    image: erichough/nfs-server:latest
+    container_name: nzbwebdav-nfs
+    privileged: true
+    restart: unless-stopped
+    ports:
+      # NFSv4 (recommended - single port)
+      - "2049:2049"
+
+      # Uncomment below for NFSv3 support if needed
+      # - "2049:2049/udp"
+      # - "111:111"
+      # - "111:111/udp"
+      # - "32765:32765"
+      # - "32765:32765/udp"
+      # - "32767:32767"
+      # - "32767:32767/udp"
+    volumes:
+      # Mount the same volume as nzbwebdav (read-only for safety)
+      - fuse-mount:/nzbwebdav:ro
+      # NFS exports configuration
+      - ./nfs-exports.txt:/etc/exports:ro
+    environment:
+      # NFS export configuration as environment variables (alternative to exports file)
+      NFS_EXPORT_0: "/nzbwebdav *(ro,sync,no_subtree_check,no_root_squash,insecure,crossmnt)"
+      # Optional: debug logging
+      # NFS_LOG_LEVEL: DEBUG
+    depends_on:
+      - nzbwebdav
+    healthcheck:
+      test: ["CMD", "rpcinfo", "-p"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  fuse-mount:
+    driver: local

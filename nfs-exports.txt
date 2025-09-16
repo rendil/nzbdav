@@ -1,0 +1,26 @@
+# NFS exports configuration for nzbwebdav content
+# 
+# Export the shared FUSE filesystem as read-only to all networks
+# Adjust the network range and options as needed for your environment
+#
+# Format: <directory> <client>(options)
+# 
+# Options used:
+# - ro: read-only access
+# - sync: synchronous writes (safer but slower)
+# - no_subtree_check: disable subtree checking (performance improvement)
+# - no_root_squash: allow root access (adjust based on security needs)
+# - insecure: allow connections from ports > 1024
+# - crossmnt: allow crossing mount points
+
+# Allow access from any IP (adjust for your network security requirements)
+/shared *(ro,sync,no_subtree_check,no_root_squash,insecure,crossmnt)
+
+# Alternative: restrict to specific network ranges
+# /shared 192.168.1.0/24(ro,sync,no_subtree_check,no_root_squash,insecure,crossmnt)
+# /shared 10.0.0.0/8(ro,sync,no_subtree_check,no_root_squash,insecure,crossmnt)
+# /shared 172.16.0.0/12(ro,sync,no_subtree_check,no_root_squash,insecure,crossmnt)
+
+# Example for specific hosts:
+# /shared client1.example.com(ro,sync,no_subtree_check,no_root_squash,insecure,crossmnt)
+# /shared client2.example.com(ro,sync,no_subtree_check,no_root_squash,insecure,crossmnt)

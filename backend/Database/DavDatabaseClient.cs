@@ -73,6 +73,12 @@ public sealed class DavDatabaseClient(DavDatabaseContext ctx)
         return await ctx.NzbFiles.FirstOrDefaultAsync(x => x.Id == id, ct);
     }
 
+    // rarfile
+    public async Task<DavRarFile?> GetRarFileAsync(Guid id, CancellationToken ct = default)
+    {
+        return await ctx.RarFiles.FirstOrDefaultAsync(x => x.Id == id, ct);
+    }
+
     // queue
     public Task<QueueItem?> GetTopQueueItem(CancellationToken ct = default)
     {
