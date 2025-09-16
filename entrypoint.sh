@@ -199,17 +199,17 @@ while true; do
                 echo "Warning: FUSE is not mounted at ${NFS_EXPORT_PATH}"
             fi
             
-            # Create a bind mount that NFS can access
-            echo "Creating bind mount for NFS access..."
-            mkdir -p /nfs-export
-            chown ubuntu:ubuntu /nfs-export
+            # Create a symlink that NFS can access
+            echo "Creating symlink for NFS access..."
             
-            # Wait a moment and try to bind mount the FUSE filesystem to a location NFS can access
-            if gosu ubuntu mount --bind "${NFS_EXPORT_PATH}" /nfs-export 2>/dev/null; then
-                echo "Bind mount successful - using /nfs-export for NFS"
+            # Try creating a symlink as ubuntu user first
+            if gosu ubuntu ln -sf "${NFS_EXPORT_PATH}" /nfs-export 2>/dev/null; then
+                echo "Symlink created as ubuntu user - using /nfs-export for NFS"
                 NFS_ACTUAL_PATH="/nfs-export"
             else
-                echo "Bind mount failed - using original path"
+                echo "Symlink creation failed, trying alternate approach..."
+                # Just use the original path but ensure directory exists
+                mkdir -p "$(dirname "${NFS_EXPORT_PATH}")" 2>/dev/null || true
                 NFS_ACTUAL_PATH="${NFS_EXPORT_PATH}"
             fi
             
@@ -239,12 +239,16 @@ while true; do
             # Start nfsd (must be run as root for kernel module access)
             rpc.nfsd 8
             
-            # Export filesystems (try as ubuntu user first, then root)
-            if gosu ubuntu exportfs -rav 2>/dev/null; then
+            # Change ownership of exports file to ubuntu so it can read it
+            chown ubuntu:ubuntu /etc/exports
+            
+            # Export filesystems as ubuntu user (who can access FUSE)
+            echo "Running exportfs as ubuntu user..."
+            if gosu ubuntu exportfs -rav; then
                 echo "Exports successful as ubuntu user"
             else
                 echo "Exports as ubuntu user failed, trying as root..."
-                exportfs -rav
+                exportfs -rav || echo "Root export also failed"
             fi
             
             # Start mountd (try as ubuntu user first)
