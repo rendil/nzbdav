@@ -44,7 +44,8 @@ RUN mkdir /config && \
         fuse3 \
         libfuse3-3 \
         libfuse3-dev \
-        nfs-utils && \
+        nfs-kernel-server \
+        rpcbind && \
         # http://wiki.linux-nfs.org/wiki/index.php/Nfsv4_configuration
     mkdir -p /var/lib/nfs/rpc_pipefs                                                     && \
     mkdir -p /var/lib/nfs/v4recovery                                                     && \
