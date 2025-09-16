@@ -26,13 +26,9 @@ services:
       - PUID=1000
       - PGID=1000
     volumes:
-      # Use tmpfs for FUSE mount point to avoid filesystem conflicts
-      - type: tmpfs
-        target: /mnt/nzbwebdav
-        tmpfs:
-          size: 100M
-      - /root/nzbdav:/config
-      - /data/streaming:/data/streaming
+      - ./config:/config
+      # - /data/streaming:/data/streaming  # Comment out until path is configured
+      # Note: /mnt/nzbwebdav will be created by FUSE, no volume mount needed
     privileged: true # Required for FUSE operations
     devices:
       - /dev/fuse:/dev/fuse
