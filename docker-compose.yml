@@ -5,7 +5,7 @@ services:
     ports:
       - "3000:3000"
       - "8080:8080"
-      # NFS ports
+      # NFS ports (standard ports, host services disabled)
       - "111:111" # RPC portmapper
       - "2049:2049" # NFSv4
       - "33333:33333" # NFS mountd (fixed port)
