@@ -256,22 +256,32 @@ while true; do
                 EXPORT_SUCCESS=false
             fi
             
-            # Start mountd - must run as root to register with portmapper
-            echo "Starting mountd as root (required for RPC registration)..."
+            # Create a dummy export that root can access for mountd initialization
+            echo "Creating dummy export for mountd registration..."
+            mkdir -p /tmp/nfs-dummy
+            chmod 755 /tmp/nfs-dummy
+            echo "# Dummy export for mountd registration" > /etc/exports.tmp
+            echo "/tmp/nfs-dummy *(ro,sync,no_subtree_check,no_root_squash,insecure)" >> /etc/exports.tmp
+            echo "/mnt/nzbwebdav *(ro,sync,no_subtree_check,no_root_squash,insecure,crossmnt,fsid=0)" >> /etc/exports.tmp
+            
+            # Use the temporary exports file
+            cp /etc/exports.tmp /etc/exports
+            
+            # Start mountd as root with the accessible dummy export
+            echo "Starting mountd as root..."
             rpc.mountd --no-nfs-version 2 --no-nfs-version 3 --port 33333 &
             MOUNTD_PID=$!
             
-            # Give mountd time to register
+            # Give mountd time to register and then check
             sleep 3
             
-            # Check if mountd registered successfully
             if rpcinfo -p localhost | grep -q mountd; then
                 echo "mountd registered successfully with portmapper"
+                # Now update exports to include the real FUSE export handled by ubuntu user
+                echo "Updating exports with FUSE mount..."
+                gosu ubuntu exportfs -rav /mnt/nzbwebdav || echo "Direct FUSE export update failed"
             else
-                echo "mountd registration failed - trying to restart..."
-                kill $MOUNTD_PID 2>/dev/null || true
-                sleep 1
-                rpc.mountd --no-nfs-version 2 --no-nfs-version 3 --port 33333 &
+                echo "mountd registration failed - NFS may not work properly"
             fi
             
             # Give services time to register
