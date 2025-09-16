@@ -40,15 +40,18 @@ public class NzbWebDavFuseFileSystem : IFuseOperations
         try
         {
             var pathStr = Encoding.UTF8.GetString(path.Span);
-            _logger.LogDebug("GetAttr called for path: {Path}", pathStr);
+            _logger.LogInformation("GetAttr called for path: '{Path}' (length: {Length})", pathStr, pathStr.Length);
             
             var item = GetDavItemByPath(pathStr).GetAwaiter().GetResult();
             if (item == null)
             {
-                _logger.LogDebug("Path not found: {Path}", pathStr);
+                _logger.LogWarning("Path not found: '{Path}' - returning ENOENT", pathStr);
                 stat = default;
                 return PosixResult.ENOENT;
             }
+
+            _logger.LogInformation("Found item for path '{Path}': Name='{Name}', Type={Type}, Id={Id}", 
+                pathStr, item.Name, item.Type, item.Id);
 
             stat = new FuseFileStat
             {
@@ -277,11 +280,16 @@ public class NzbWebDavFuseFileSystem : IFuseOperations
     {
         try
         {
+            _logger.LogInformation("GetDavItemByPath: Input path: '{Path}'", path);
+            
             // Normalize path
             path = path.Trim('/');
             
+            _logger.LogInformation("GetDavItemByPath: Normalized path: '{Path}' (empty: {IsEmpty})", path, string.IsNullOrEmpty(path));
+            
             if (string.IsNullOrEmpty(path))
             {
+                _logger.LogInformation("GetDavItemByPath: Returning Root item: Name='{Name}', Type={Type}", DavItem.Root.Name, DavItem.Root.Type);
                 return DavItem.Root;
             }
 
