@@ -72,6 +72,9 @@ RUN mkdir /config && \
     which fusermount3 && \
     ldd /usr/bin/fusermount3 && \
     echo "=== End FUSE Debug ===" && \
+    # Enable allow_other option in FUSE configuration \
+    echo "user_allow_other" >> /etc/fuse.conf && \
+    echo "FUSE configuration updated to allow allow_other option" && \
     # Clean up \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
