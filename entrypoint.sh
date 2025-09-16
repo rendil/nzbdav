@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 wait_either() {
     local pid1=$1
@@ -44,12 +44,12 @@ PGID=${PGID:-1000}
 
 # Create group if it doesn't exist
 if ! getent group appgroup >/dev/null; then
-    addgroup -g "$PGID" appgroup
+    groupadd -g "$PGID" appgroup
 fi
 
 # Create user if it doesn't exist
 if ! id appuser >/dev/null 2>&1; then
-    adduser -D -H -u "$PUID" -G appgroup appuser
+    useradd -M -u "$PUID" -g appgroup appuser
 fi
 
 # Set environment variables
@@ -67,7 +67,7 @@ chown $PUID:$PGID /config
 # Run backend database migration
 cd /app/backend
 echo "Running database maintenance."
-su-exec appuser ./NzbWebDAV --db-migration
+gosu appuser ./NzbWebDAV --db-migration
 if [ $? -ne 0 ]; then
     echo "Database migration failed. Exiting with error code $?."
     exit $?
@@ -75,7 +75,7 @@ fi
 echo "Done with database maintenance."
 
 # Run backend as appuser in background
-su-exec appuser ./NzbWebDAV &
+gosu appuser ./NzbWebDAV &
 BACKEND_PID=$!
 
 # Wait for backend health check
@@ -103,7 +103,7 @@ done
 
 # Run frontend as appuser in background
 cd /app/frontend
-su-exec appuser npm run start &
+gosu appuser npm run start &
 FRONTEND_PID=$!
 
 # Wait for either to exit

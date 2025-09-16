@@ -21,7 +21,7 @@ services:
       - PGID=1000
     volumes:
       # Add FUSE mount point (if not already in your main compose file)
-      - fuse-mount:/mnt/nzbwebdav
+      - nzbwebdav-fuse:/mnt/nzbwebdav
       - /root/nzbdav:/config
       - /data/streaming:/data/streaming
     privileged: true # Required for FUSE operations
@@ -50,7 +50,7 @@ services:
       # - "32767:32767/udp"
     volumes:
       # Mount the same volume as nzbwebdav (read-only for safety)
-      - fuse-mount:/nzbwebdav:ro
+      - nzbwebdav-fuse:/nzbwebdav:ro
       # NFS exports configuration
       - ./nfs-exports.txt:/etc/exports:ro
     environment:
@@ -68,5 +68,5 @@ services:
       start_period: 10s
 
 volumes:
-  fuse-mount:
+  nzbwebdav-fuse:
     driver: local

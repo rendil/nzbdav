@@ -44,8 +44,14 @@ public class FuseService : BackgroundService
             
             try
             {
+                // Create scoped services for testing
+                using var testScope = _serviceScopeFactory.CreateScope();
+                var testDbClient = testScope.ServiceProvider.GetRequiredService<DavDatabaseClient>();
+                var testUsenetClient = testScope.ServiceProvider.GetRequiredService<UsenetStreamingClient>();
+                var testLogger = testScope.ServiceProvider.GetRequiredService<ILogger<NzbWebDavFuseFileSystem>>();
+                
                 // Create filesystem instance - this will test basic type loading
-                var testOperations = new NzbWebDavFuseFileSystem(_logger, _dbClient, _configManager, _usenetClient);
+                var testOperations = new NzbWebDavFuseFileSystem(testLogger, testDbClient, _configManager, testUsenetClient);
                 _logger.LogInformation("FUSE types loaded successfully");
                 
                 // Now try to call FUSE.Mount to see if native library loads
