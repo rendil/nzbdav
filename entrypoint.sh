@@ -3,7 +3,7 @@
 wait_either() {
     local pid1=$1
     local pid2=$2
-    local pid3=$3
+    #local pid3=$3
 
     while true; do
         if ! kill -0 "$pid1" 2>/dev/null; then
@@ -20,12 +20,12 @@ wait_either() {
             return $?
         fi
 
-        if ! kill -0 "$pid3" 2>/dev/null; then
-            wait "$pid3"
-            EXITED_PID=$pid3
-            REMAINING_PIDS=($pid1 $pid2)
-            return $?
-        fi
+        # if ! kill -0 "$pid3" 2>/dev/null; then
+        #     wait "$pid3"
+        #     EXITED_PID=$pid3
+        #     REMAINING_PIDS=($pid1 $pid2)
+        #     return $?
+        # fi
 
         sleep 0.5
     done
@@ -257,7 +257,7 @@ rclone serve nfs nzbdav: --addr 0.0.0.0:33333 \
 RCLONE_PID=$!
 
 # Wait for either to exit
-wait_either $BACKEND_PID $FRONTEND_PID $RCLONE_PID
+wait_either $BACKEND_PID $FRONTEND_PID
 EXIT_CODE=$?
 
 # Determine which process exited
