@@ -195,8 +195,7 @@ while true; do
             export NFS_EXPORT_0="${NFS_EXPORT_PATH} *(ro,sync,no_subtree_check,no_root_squash,insecure,crossmnt,fsid=0)"
             export NFS_PORT_MOUNTD=33333
             export NFS_LOG_LEVEL=DEBUG
-            export NFS_VERSION=4
-            export NFS_DISABLE_VERSION_3=true
+            export NFS_VERSION=4.2
             
             # Remove existing empty /etc/exports so the script uses environment variables
             echo "Removing existing /etc/exports to use environment variables..."
