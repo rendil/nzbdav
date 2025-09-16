@@ -63,13 +63,13 @@ public class NzbWebDavFuseFileSystem : IFuseOperations
                 item.Type == DavItem.ItemType.SymlinkRoot || 
                 item.Type == DavItem.ItemType.IdsRoot)
             {
-                stat.st_mode = (PosixFileMode)0x41ED; // S_IFDIR (0x4000) | 0755 permissions
+                stat.st_mode = (PosixFileMode)0x41FF; // S_IFDIR (0x4000) | 0777 permissions (rwxrwxrwx)
                 stat.st_nlink = 2;
                 stat.st_size = 0;
             }
             else
             {
-                stat.st_mode = (PosixFileMode)0x81A4; // S_IFREG (0x8000) | 0644 permissions
+                stat.st_mode = (PosixFileMode)0x81B6; // S_IFREG (0x8000) | 0666 permissions (rw-rw-rw-)
                 stat.st_nlink = 1;
                 stat.st_size = item.FileSize ?? 0;
             }
