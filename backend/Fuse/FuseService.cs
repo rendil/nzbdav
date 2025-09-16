@@ -39,22 +39,46 @@ public class FuseService : BackgroundService
                 return;
             }
 
-            // Pre-check: Verify FUSE is available before attempting complex operations
+            // Try to load FUSE and see what specific error we get
+            _logger.LogInformation("Attempting to load FUSE library...");
+            
             try
             {
-                // Test if we can at least load the FUSE library
-                FuseDotNet.Fuse.Mount(null, new string[] { "--help" });
-                _logger.LogDebug("FUSE library test passed");
+                // Create filesystem instance - this will test basic type loading
+                var testOperations = new NzbWebDavFuseFileSystem(_logger, _dbClient, _configManager, _usenetClient);
+                _logger.LogInformation("FUSE types loaded successfully");
+                
+                // Now try to call FUSE.Mount to see if native library loads
+                _logger.LogInformation("Testing FUSE native library...");
+                FuseDotNet.Fuse.Mount(testOperations, new string[] { "test", "--help" });
+                _logger.LogInformation("FUSE native library test completed");
             }
-            catch (DllNotFoundException)
+            catch (DllNotFoundException dllEx)
             {
-                _logger.LogWarning("FUSE library not available - skipping FUSE functionality");
+                _logger.LogError("FUSE DLL not found - this indicates the native FUSE library isn't properly installed or linked");
+                _logger.LogError("DLL Error: {Error}", dllEx.Message);
+                _logger.LogError("Available library paths: {LibPaths}", Environment.GetEnvironmentVariable("LD_LIBRARY_PATH"));
+                
+                // Check if expected files exist
+                var expectedPaths = new[] { 
+                    "/usr/lib/libfuse3.so", 
+                    "/usr/lib/x86_64-linux-gnu/libfuse3.so",
+                    "/usr/local/lib/libfuse3.so"
+                };
+                
+                foreach (var path in expectedPaths)
+                {
+                    var exists = File.Exists(path);
+                    _logger.LogError("File {Path} exists: {Exists}", path, exists);
+                }
+                
                 _logger.LogInformation("Application will continue with WebDAV-only access");
                 return;
             }
             catch (Exception ex)
             {
-                _logger.LogDebug("FUSE library loaded successfully (expected error on help test): {Error}", ex.Message);
+                _logger.LogInformation("FUSE library test completed with expected error: {Error}", ex.Message);
+                _logger.LogInformation("This is normal for the --help test, FUSE should work");
             }
 
             _logger.LogInformation("Starting FUSE filesystem at mount point: {MountPoint}", _mountPoint);
