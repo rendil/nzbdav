@@ -256,12 +256,21 @@ while true; do
                 EXPORT_SUCCESS=false
             fi
             
-            # Start mountd (try as ubuntu user first)
-            echo "Starting mountd as ubuntu user..."
-            if gosu ubuntu rpc.mountd --no-nfs-version 2 --no-nfs-version 3 --port 33333 2>/dev/null; then
-                echo "mountd started as ubuntu user"
+            # Start mountd - must run as root to register with portmapper
+            echo "Starting mountd as root (required for RPC registration)..."
+            rpc.mountd --no-nfs-version 2 --no-nfs-version 3 --port 33333 &
+            MOUNTD_PID=$!
+            
+            # Give mountd time to register
+            sleep 3
+            
+            # Check if mountd registered successfully
+            if rpcinfo -p localhost | grep -q mountd; then
+                echo "mountd registered successfully with portmapper"
             else
-                echo "mountd as ubuntu user failed, trying as root..."
+                echo "mountd registration failed - trying to restart..."
+                kill $MOUNTD_PID 2>/dev/null || true
+                sleep 1
                 rpc.mountd --no-nfs-version 2 --no-nfs-version 3 --port 33333 &
             fi
             
