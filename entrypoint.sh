@@ -127,7 +127,10 @@ SLEEP_PID=$!
 echo "=== END FUSE DEBUG ==="
 
 # Run backend as appuser in background
-gosu "$USER_NAME" ./NzbWebDAV &
+# gosu "$USER_NAME" ./NzbWebDAV &
+
+# Test - run as root in background
+./NzbWebDAV &
 BACKEND_PID=$!
 
 # Start NFS server if enabled (after backend starts and FUSE is mounted)
