@@ -490,7 +490,10 @@ init_exports() {
 
 init_runtime_assertions() {
 
-  if ! is_granted_linux_capability 'cap_sys_admin'; then
+  # Skip CAP_SYS_ADMIN check for Docker containers (we're running privileged)
+  if [[ -f /.dockerenv ]]; then
+    log "Skipping CAP_SYS_ADMIN check (running in Docker container)"
+  elif ! is_granted_linux_capability 'cap_sys_admin'; then
     bail 'missing CAP_SYS_ADMIN. be sure to run this image with --cap-add SYS_ADMIN or --privileged'
   fi
 
