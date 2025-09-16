@@ -3,48 +3,54 @@ FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build-env
 WORKDIR /nzb-webdav
 COPY ./ ./
 RUN dotnet restore
-RUN dotnet publish -c Release -r linux-musl-x64 -o ./publish
+RUN dotnet publish -c Release -r linux-x64 -o ./publish
 
-# Build the production image
-FROM mcr.microsoft.com/dotnet/aspnet:9.0-alpine
+# Build the production image - using Ubuntu for better FUSE compatibility
+FROM mcr.microsoft.com/dotnet/aspnet:9.0-jammy
 EXPOSE 8080
 WORKDIR /nzb-webdav
 RUN mkdir /config
 
 # Set environment variables for native library loading
-ENV LD_LIBRARY_PATH="/usr/lib:/lib:/usr/local/lib"
-ENV LD_DEBUG=""
+ENV LD_LIBRARY_PATH="/usr/lib:/lib:/usr/local/lib:/usr/lib/x86_64-linux-gnu"
 
-# Install FUSE3 and create proper symlinks for LTRData.FuseDotNet
-RUN apk add --no-cache libc6-compat shadow su-exec ffmpeg fuse3 fuse3-dev fuse3-libs && \
+# Install required packages including FUSE3
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        fuse3 \
+        libfuse3-3 \
+        libfuse3-dev \
+        ffmpeg \
+        gosu && \
     echo "=== FUSE Installation Debug ===" && \
     # Show what packages were installed \
-    apk list | grep fuse && \
+    dpkg -l | grep fuse && \
     # Show all FUSE files \
     find /usr /lib -name "*fuse*" -type f 2>/dev/null | sort && \
     # Show library directories \
-    ls -la /usr/lib/ | grep -i fuse || echo "No fuse in /usr/lib" && \
-    ls -la /lib/ | grep -i fuse || echo "No fuse in /lib" && \
-    # Create comprehensive symlinks in multiple locations \
+    ls -la /usr/lib/x86_64-linux-gnu/ | grep -i fuse || echo "No fuse in /usr/lib/x86_64-linux-gnu" && \
+    ls -la /lib/x86_64-linux-gnu/ | grep -i fuse || echo "No fuse in /lib/x86_64-linux-gnu" && \
+    # Create comprehensive symlinks for .NET library discovery \
     mkdir -p /usr/local/lib && \
-    # Try to find the actual FUSE library and create symlinks \
-    for fusefile in $(find /usr /lib -name "*fuse3*" -name "*.so*" 2>/dev/null); do \
-        echo "Found FUSE file: $fusefile"; \
-        ln -sf "$fusefile" /usr/lib/libfuse3.so 2>/dev/null || true; \
-        ln -sf "$fusefile" /usr/lib/fuse3.so 2>/dev/null || true; \
-        ln -sf "$fusefile" /usr/local/lib/libfuse3.so 2>/dev/null || true; \
-        ln -sf "$fusefile" /usr/local/lib/fuse3.so 2>/dev/null || true; \
-        ln -sf "$fusefile" /lib/libfuse3.so 2>/dev/null || true; \
-        ln -sf "$fusefile" /lib/fuse3.so 2>/dev/null || true; \
-    done && \
+    # Standard Ubuntu FUSE3 library locations and symlinks \
+    if [ -f /usr/lib/x86_64-linux-gnu/libfuse3.so.3 ]; then \
+        echo "Found FUSE3 library, creating symlinks..."; \
+        ln -sf /usr/lib/x86_64-linux-gnu/libfuse3.so.3 /usr/lib/x86_64-linux-gnu/libfuse3.so; \
+        ln -sf /usr/lib/x86_64-linux-gnu/libfuse3.so.3 /usr/lib/libfuse3.so; \
+        ln -sf /usr/lib/x86_64-linux-gnu/libfuse3.so.3 /usr/local/lib/libfuse3.so; \
+        ln -sf /usr/lib/x86_64-linux-gnu/libfuse3.so.3 /usr/lib/fuse3.so; \
+        ln -sf /usr/lib/x86_64-linux-gnu/libfuse3.so.3 /usr/local/lib/fuse3.so; \
+    fi && \
     # Final verification \
     echo "=== Final library check ===" && \
-    ls -la /usr/lib/*fuse* /lib/*fuse* /usr/local/lib/*fuse* 2>/dev/null || echo "Still no FUSE libraries found" && \
+    ls -la /usr/lib/*fuse* /lib/*fuse* /usr/local/lib/*fuse* /usr/lib/x86_64-linux-gnu/*fuse* 2>/dev/null || echo "No FUSE libraries found" && \
+    echo "=== FUSE Binary Check ===" && \
+    which fusermount3 && \
+    ldd /usr/bin/fusermount3 && \
     echo "=== End FUSE Debug ===" && \
-    # Test FUSE binary availability \
-    which fusermount3 || echo "fusermount3 not found" && \
-    ldd /usr/bin/fusermount3 2>/dev/null || echo "Cannot check fusermount3 dependencies" && \
-    rm -rf /var/cache/apk/*
+    # Clean up \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 COPY --from=build-env /nzb-webdav/publish ./
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
