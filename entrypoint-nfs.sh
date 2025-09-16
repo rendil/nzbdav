@@ -457,8 +457,9 @@ init_exports() {
       read -r -a line_as_array <<< "$line"
       local dir="${line_as_array[0]}"
 
-      if [[ ! -d "$dir" ]]; then
-        log_warning "skipping $candidate_export_var environment variable since $dir is not a container directory"
+      # Check if directory exists or if it's a FUSE mount point
+      if [[ ! -d "$dir" ]] && ! mount | grep -q " on $dir "; then
+        log_warning "skipping $candidate_export_var environment variable since $dir is not a container directory or mount point"
         continue
       fi
 
