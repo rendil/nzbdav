@@ -13,15 +13,22 @@ services:
     ports:
       - "3000:3000"
       - "8080:8080"
+      # NFS ports
+      - "2049:2049" # NFSv4
     environment:
       # Enable FUSE filesystem
       - FUSE_ENABLED=true
       - FUSE_MOUNT_POINT=/mnt/nzbwebdav
+      - NFS_ENABLED=true
+      - NFS_EXPORT_PATH=/mnt/nzbwebdav
       - PUID=1000
       - PGID=1000
     volumes:
-      # Add FUSE mount point (using bind mount for NFS sharing)
-      - ./fuse-mount:/mnt/nzbwebdav:shared
+      # Use tmpfs for FUSE mount point to avoid filesystem conflicts
+      - type: tmpfs
+        target: /mnt/nzbwebdav
+        tmpfs:
+          size: 100M
       - ./config:/config
       # - /data/streaming:/data/streaming  # Comment out until path is configured
     privileged: true # Required for FUSE operations
@@ -30,44 +37,9 @@ services:
     cap_add:
       - SYS_ADMIN
 
-  # NFS server to share the FUSE-mounted content
-  nfs-server:
-    image: erichough/nfs-server:latest
-    container_name: nzbwebdav-nfs
-    privileged: true
-    restart: unless-stopped
-    ports:
-      # NFSv4 (recommended - single port)
-      - "2049:2049"
-
-      # Uncomment below for NFSv3 support if needed
-      # - "2049:2049/udp"
-      # - "111:111"
-      # - "111:111/udp"
-      # - "32765:32765"
-      # - "32765:32765/udp"
-      # - "32767:32767"
-      # - "32767:32767/udp"
-    volumes:
-      # Mount the same directory as nzbwebdav (read-only for safety)
-      - ./fuse-mount:/nzbwebdav:ro
-      # NFS exports configuration
-      - ./nfs-exports.txt:/etc/exports:ro
-    environment:
-      # NFS export configuration as environment variables (alternative to exports file)
-      - NFS_EXPORT_0=/nzbwebdav *(ro,sync,no_subtree_check,no_root_squash,insecure,crossmnt)
-      # Optional: debug logging
-      # - NFS_LOG_LEVEL=DEBUG
-    depends_on:
-      - nzbwebdav
-    healthcheck:
-      test: ["CMD", "rpcinfo", "-p"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
-
+  # NFS server is now integrated into the main nzbwebdav container
+  # This allows FUSE mounts to be properly shared via NFS
 # volumes:
-  # nzbwebdav-fuse:
-    # driver: local
+# nzbwebdav-fuse:
+# driver: local
 # Using bind mounts instead of Docker volumes for FUSE sharing

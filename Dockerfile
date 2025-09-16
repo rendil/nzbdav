@@ -42,7 +42,9 @@ RUN mkdir /config && \
         gosu \
         fuse3 \
         libfuse3-3 \
-        libfuse3-dev && \
+        libfuse3-dev \
+        nfs-kernel-server \
+        rpcbind && \
     echo "=== FUSE Installation Debug ===" && \
     # Show what packages were installed \
     dpkg -l | grep fuse && \

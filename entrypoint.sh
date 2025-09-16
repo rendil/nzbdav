@@ -104,6 +104,11 @@ echo "Done with database maintenance."
 gosu "$USER_NAME" ./NzbWebDAV &
 BACKEND_PID=$!
 
+# Start NFS server if enabled (after backend starts and FUSE is mounted)
+if [ "${NFS_ENABLED:-false}" = "true" ] && [ -n "${NFS_EXPORT_PATH:-}" ]; then
+    echo "NFS server will be started after backend is healthy..."
+fi
+
 # Wait for backend health check
 echo "Waiting for backend to start."
 MAX_BACKEND_HEALTH_RETRIES=${MAX_BACKEND_HEALTH_RETRIES:-30}
@@ -113,6 +118,31 @@ while true; do
     echo "Checking backend health: $BACKEND_URL/health ..."
     if curl -s -o /dev/null -w "%{http_code}" "$BACKEND_URL/health" | grep -q "^200$"; then
         echo "Backend is healthy."
+        
+        # Start NFS server if enabled (now that backend is healthy and FUSE should be mounted)
+        if [ "${NFS_ENABLED:-false}" = "true" ] && [ -n "${NFS_EXPORT_PATH:-}" ]; then
+            echo "Starting NFS server for path: ${NFS_EXPORT_PATH}"
+            
+            # Wait a moment for FUSE to be fully ready
+            sleep 2
+            
+            # Create NFS exports file
+            echo "${NFS_EXPORT_PATH} *(ro,sync,no_subtree_check,no_root_squash,insecure,crossmnt)" > /etc/exports
+            
+            # Start RPC services
+            rpcbind || echo "rpcbind already running"
+            
+            # Start NFS services  
+            exportfs -rav
+            rpc.nfsd 8
+            rpc.mountd --no-nfs-version 2 --no-nfs-version 3 &
+            
+            echo "NFS server started and exporting ${NFS_EXPORT_PATH}"
+            
+            # Show exports
+            showmount -e localhost || echo "Could not show exports yet"
+        fi
+        
         break
     fi
 
