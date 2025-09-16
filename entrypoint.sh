@@ -42,14 +42,34 @@ trap terminate TERM INT
 PUID=${PUID:-1000}
 PGID=${PGID:-1000}
 
-# Create group if it doesn't exist
+# Create group if it doesn't exist, or use existing one with same GID
 if ! getent group appgroup >/dev/null; then
-    groupadd -g "$PGID" appgroup
+    if getent group "$PGID" >/dev/null; then
+        # Use existing group with that GID
+        EXISTING_GROUP=$(getent group "$PGID" | cut -d: -f1)
+        echo "Using existing group $EXISTING_GROUP with GID $PGID"
+        GROUP_NAME="$EXISTING_GROUP"
+    else
+        groupadd -g "$PGID" appgroup
+        GROUP_NAME="appgroup"
+    fi
+else
+    GROUP_NAME="appgroup"
 fi
 
-# Create user if it doesn't exist
+# Create user if it doesn't exist, or use existing one with same UID
 if ! id appuser >/dev/null 2>&1; then
-    useradd -M -u "$PUID" -g appgroup appuser
+    if id "$PUID" >/dev/null 2>&1; then
+        # Use existing user with that UID
+        EXISTING_USER=$(id -nu "$PUID")
+        echo "Using existing user $EXISTING_USER with UID $PUID"
+        USER_NAME="$EXISTING_USER"
+    else
+        useradd -M -u "$PUID" -g "$PGID" appuser
+        USER_NAME="appuser"
+    fi
+else
+    USER_NAME="appuser"
 fi
 
 # Set environment variables
@@ -58,16 +78,22 @@ if [ -z "${BACKEND_URL}" ]; then
 fi
 
 if [ -z "${FRONTEND_BACKEND_API_KEY}" ]; then
-    export FRONTEND_BACKEND_API_KEY=$(head -c 32 /dev/urandom | hexdump -ve '1/1 "%.2x"')
+    export FRONTEND_BACKEND_API_KEY=$(head -c 32 /dev/urandom | od -A n -t x1 | tr -d ' \n')
 fi
 
 # Change permissions on /config directory to the given PUID and PGID
 chown $PUID:$PGID /config
 
+# Ensure FUSE mount point has correct permissions
+if [ -d "/mnt/nzbwebdav" ]; then
+    chown $PUID:$PGID /mnt/nzbwebdav
+    chmod 755 /mnt/nzbwebdav
+fi
+
 # Run backend database migration
 cd /app/backend
 echo "Running database maintenance."
-gosu appuser ./NzbWebDAV --db-migration
+gosu "$USER_NAME" ./NzbWebDAV --db-migration
 if [ $? -ne 0 ]; then
     echo "Database migration failed. Exiting with error code $?."
     exit $?
@@ -75,7 +101,7 @@ fi
 echo "Done with database maintenance."
 
 # Run backend as appuser in background
-gosu appuser ./NzbWebDAV &
+gosu "$USER_NAME" ./NzbWebDAV &
 BACKEND_PID=$!
 
 # Wait for backend health check
@@ -103,7 +129,7 @@ done
 
 # Run frontend as appuser in background
 cd /app/frontend
-gosu appuser npm run start &
+gosu "$USER_NAME" npm run start &
 FRONTEND_PID=$!
 
 # Wait for either to exit
