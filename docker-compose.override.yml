@@ -19,9 +19,9 @@ services:
       - "33333:33333" # NFS mountd (fixed port)
     environment:
       # Enable FUSE filesystem
-      - FUSE_ENABLED=true
+      - FUSE_ENABLED=false
       - FUSE_MOUNT_POINT=/mnt/nzbwebdav
-      - NFS_ENABLED=true
+      - NFS_ENABLED=false
       - NFS_EXPORT_PATH=/mnt/nzbwebdav
       - PUID=1000
       - PGID=1000

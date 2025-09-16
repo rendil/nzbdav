@@ -53,6 +53,15 @@ RUN mkdir /config && \
     echo "rpc_pipefs  /var/lib/nfs/rpc_pipefs  rpc_pipefs  defaults  0  0" >> /etc/fstab && \
     echo "nfsd        /proc/fs/nfsd            nfsd        defaults  0  0" >> /etc/fstab && \
 
+    echo "=== RCLONE Installation Debug ===" && \
+    (curl https://rclone.org/install.sh | bash) && \
+    rclone config create nzbdav webdav \
+      url=http://localhost:8080 \
+      vendor=other \
+      user=nzbdav \
+      pass=$(rclone obscure "nzbdav") && \
+    echo "=== End RCLONE Debug ===" && \
+
     echo "=== FUSE Installation Debug ===" && \
     # Show what packages were installed \
     dpkg -l | grep fuse && \

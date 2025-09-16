@@ -3,19 +3,27 @@
 wait_either() {
     local pid1=$1
     local pid2=$2
+    local pid3=$3
 
     while true; do
         if ! kill -0 "$pid1" 2>/dev/null; then
             wait "$pid1"
             EXITED_PID=$pid1
-            REMAINING_PID=$pid2
+            REMAINING_PIDS=($pid2 $pid3)
             return $?
         fi
 
         if ! kill -0 "$pid2" 2>/dev/null; then
             wait "$pid2"
             EXITED_PID=$pid2
-            REMAINING_PID=$pid1
+            REMAINING_PIDS=($pid1 $pid3)
+            return $?
+        fi
+
+        if ! kill -0 "$pid3" 2>/dev/null; then
+            wait "$pid3"
+            EXITED_PID=$pid3
+            REMAINING_PIDS=($pid1 $pid2)
             return $?
         fi
 
@@ -127,10 +135,10 @@ SLEEP_PID=$!
 echo "=== END FUSE DEBUG ==="
 
 # Run backend as appuser in background
-# gosu "$USER_NAME" ./NzbWebDAV &
+gosu "$USER_NAME" ./NzbWebDAV &
 
 # Test - run as root in background
-./NzbWebDAV &
+#./NzbWebDAV &
 BACKEND_PID=$!
 
 # Start NFS server if enabled (after backend starts and FUSE is mounted)
@@ -234,19 +242,38 @@ cd /app/frontend
 gosu "$USER_NAME" npm run start &
 FRONTEND_PID=$!
 
+rclone serve nfs nzbdav: --addr 0.0.0.0:33333 \
+    --vfs-cache-mode=full \
+    --buffer-size=1024 \
+    --dir-cache-time=1s \
+    --vfs-cache-max-size=5G \
+    --vfs-cache-max-age=180m \
+    --links \
+    --use-cookies \
+    --allow-other \
+    --uid=1000 \
+    --gid=1000 \
+    --nfs-cache-type disk &
+RCLONE_PID=$!
+
 # Wait for either to exit
-wait_either $BACKEND_PID $FRONTEND_PID
+wait_either $BACKEND_PID $FRONTEND_PID $RCLONE_PID
 EXIT_CODE=$?
 
 # Determine which process exited
 if [ "$EXITED_PID" -eq "$FRONTEND_PID" ]; then
-    echo "The web-frontend has exited. Shutting down the web-backend..."
+    echo "The web-frontend has exited. Shutting down the web-backend and rclone..."
+elif [ "$EXITED_PID" -eq "$RCLONE_PID" ]; then
+    echo "The rclone has exited. Shutting down the web-frontend and web-backend..."
 else
-    echo "The web-backend has exited. Shutting down the web-frontend..."
+    echo "The web-backend has exited. Shutting down the web-frontend and rclone..."
 fi
 
-# Kill the remaining process
-kill $REMAINING_PID
+# Kill the remaining processes in a loop
+while [ ${#REMAINING_PIDS[@]} -gt 0 ]; do
+    kill ${REMAINING_PIDS[0]}
+    REMAINING_PIDS=(${REMAINING_PIDS[@]:1})
+done
 
 # Exit with the code of the process that died first
 exit $EXIT_CODE
