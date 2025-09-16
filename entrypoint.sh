@@ -123,24 +123,51 @@ while true; do
         if [ "${NFS_ENABLED:-false}" = "true" ] && [ -n "${NFS_EXPORT_PATH:-}" ]; then
             echo "Starting NFS server for path: ${NFS_EXPORT_PATH}"
             
-            # Wait a moment for FUSE to be fully ready
-            sleep 2
+            # Wait for FUSE to be fully ready and check if mount point is accessible
+            sleep 3
+            
+            # Check if FUSE mount is accessible and fix permissions if needed
+            if [ -d "${NFS_EXPORT_PATH}" ]; then
+                # Try to access the directory as root to verify FUSE is working
+                ls "${NFS_EXPORT_PATH}" > /dev/null 2>&1 || echo "FUSE mount may not be ready yet"
+                
+                # Ensure NFS can access the mount point
+                chmod 755 "${NFS_EXPORT_PATH}" || echo "Could not set permissions on ${NFS_EXPORT_PATH}"
+            else
+                echo "Warning: ${NFS_EXPORT_PATH} does not exist - FUSE may not be mounted"
+            fi
             
             # Create NFS exports file
-            echo "${NFS_EXPORT_PATH} *(ro,sync,no_subtree_check,no_root_squash,insecure,crossmnt)" > /etc/exports
+            echo "${NFS_EXPORT_PATH} *(ro,sync,no_subtree_check,no_root_squash,insecure,crossmnt,fsid=0)" > /etc/exports
             
-            # Start RPC services
-            rpcbind || echo "rpcbind already running"
+            # Start RPC services in proper order
+            echo "Starting rpcbind..."
+            rpcbind -f &
+            sleep 1
             
-            # Start NFS services  
-            exportfs -rav
+            echo "Starting NFS services..."
+            # Start nfsd first
             rpc.nfsd 8
+            
+            # Export filesystems
+            exportfs -rav
+            
+            # Start mountd last
             rpc.mountd --no-nfs-version 2 --no-nfs-version 3 &
+            
+            # Give services time to register
+            sleep 2
             
             echo "NFS server started and exporting ${NFS_EXPORT_PATH}"
             
-            # Show exports
-            showmount -e localhost || echo "Could not show exports yet"
+            # Show exports (with retry)
+            for i in 1 2 3; do
+                if showmount -e localhost 2>/dev/null; then
+                    break
+                fi
+                echo "Waiting for NFS services to be ready... (attempt $i/3)"
+                sleep 2
+            done
         fi
         
         break
