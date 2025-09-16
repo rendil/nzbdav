@@ -41,6 +41,9 @@ RUN apk add --no-cache libc6-compat shadow su-exec ffmpeg fuse3 fuse3-dev fuse3-
     echo "=== Final library check ===" && \
     ls -la /usr/lib/*fuse* /lib/*fuse* /usr/local/lib/*fuse* 2>/dev/null || echo "Still no FUSE libraries found" && \
     echo "=== End FUSE Debug ===" && \
+    # Test FUSE binary availability \
+    which fusermount3 || echo "fusermount3 not found" && \
+    ldd /usr/bin/fusermount3 2>/dev/null || echo "Cannot check fusermount3 dependencies" && \
     rm -rf /var/cache/apk/*
 COPY --from=build-env /nzb-webdav/publish ./
 COPY entrypoint.sh /entrypoint.sh

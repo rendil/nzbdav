@@ -39,6 +39,24 @@ public class FuseService : BackgroundService
                 return;
             }
 
+            // Pre-check: Verify FUSE is available before attempting complex operations
+            try
+            {
+                // Test if we can at least load the FUSE library
+                var testResult = FuseDotNet.Fuse.Mount(null, new string[] { "--help" });
+                _logger.LogDebug("FUSE library test passed");
+            }
+            catch (DllNotFoundException)
+            {
+                _logger.LogWarning("FUSE library not available - skipping FUSE functionality");
+                _logger.LogInformation("Application will continue with WebDAV-only access");
+                return;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug("FUSE library loaded successfully (expected error on help test): {Error}", ex.Message);
+            }
+
             _logger.LogInformation("Starting FUSE filesystem at mount point: {MountPoint}", _mountPoint);
 
             // Ensure mount point directory exists
@@ -65,6 +83,27 @@ public class FuseService : BackgroundService
 
             _logger.LogInformation("Mounting FUSE filesystem...");
             
+            // Debug: Check if FUSE libraries are available at runtime
+            _logger.LogInformation("=== Runtime FUSE Debug ===");
+            try
+            {
+                var ldLibraryPath = Environment.GetEnvironmentVariable("LD_LIBRARY_PATH");
+                _logger.LogInformation("LD_LIBRARY_PATH: {LdLibraryPath}", ldLibraryPath ?? "not set");
+                
+                // Check if files exist
+                var paths = new[] { "/usr/lib/libfuse3.so", "/lib/libfuse3.so", "/usr/lib/fuse3.so" };
+                foreach (var path in paths)
+                {
+                    var exists = File.Exists(path);
+                    _logger.LogInformation("File {Path} exists: {Exists}", path, exists);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error during runtime FUSE debug");
+            }
+            _logger.LogInformation("=== End Runtime Debug ===");
+            
             // This will block until the filesystem is unmounted
             await Task.Run(() => 
             {
@@ -72,6 +111,12 @@ public class FuseService : BackgroundService
                 {
                     FuseDotNet.Fuse.Mount(_fileSystem, new[] { "nzbwebdav", "-f", _mountPoint });
                     _logger.LogInformation("FUSE mount completed");
+                }
+                catch (DllNotFoundException dllEx)
+                {
+                    _logger.LogError("FUSE library not found - this might be due to Alpine Linux compatibility issues. FUSE functionality will be disabled.");
+                    _logger.LogError("DLL Error: {Error}", dllEx.Message);
+                    _logger.LogInformation("The application will continue without FUSE support. Consider using WebDAV access instead.");
                 }
                 catch (Exception ex)
                 {
