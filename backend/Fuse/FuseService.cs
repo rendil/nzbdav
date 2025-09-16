@@ -110,11 +110,7 @@ public class FuseService : BackgroundService
             var options = new string[] 
             { 
                 "-f", // foreground mode
-                "-o", "allow_other", // allow other users to access
-                "-o", "default_permissions", // use default permission checking
-                "-o", "fsname=nzbwebdav", // filesystem name
-                "-o", "subtype=nzbwebdav", // filesystem subtype
-                "-o", "ro" // read-only mount
+                "-o", "allow_other,default_permissions,ro,fsname=nzbwebdav,subtype=nzbwebdav" // combined options
             };
 
             _logger.LogInformation("Mounting FUSE filesystem...");

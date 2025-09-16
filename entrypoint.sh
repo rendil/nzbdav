@@ -178,12 +178,12 @@ while true; do
                 
                 # Try to access the FUSE mount as the ubuntu user
                 echo "Testing access as ubuntu user..."
-                if sudo -u ubuntu ls "${NFS_EXPORT_PATH}" > /dev/null 2>&1; then
+                if gosu ubuntu ls "${NFS_EXPORT_PATH}" > /dev/null 2>&1; then
                     echo "FUSE mount is accessible by ubuntu user"
-                    sudo -u ubuntu ls -la "${NFS_EXPORT_PATH}/" | head -5
+                    gosu ubuntu ls -la "${NFS_EXPORT_PATH}/" | head -5
                 else
                     echo "FUSE mount access issue for ubuntu user"
-                    sudo -u ubuntu ls "${NFS_EXPORT_PATH}" 2>&1 | head -3 || true
+                    gosu ubuntu ls "${NFS_EXPORT_PATH}" 2>&1 | head -3 || true
                 fi
                 
                 # Try to access as root for NFS
