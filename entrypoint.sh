@@ -100,6 +100,26 @@ if [ $? -ne 0 ]; then
 fi
 echo "Done with database maintenance."
 
+# FUSE DEBUG: Check if directory exists and try to create it
+echo "=== FUSE MOUNT DEBUG ==="
+echo "FUSE_ENABLED env var: ${FUSE_ENABLED:-not set}"
+echo "FUSE_MOUNT_POINT env var: ${FUSE_MOUNT_POINT:-not set}"
+echo "NFS_ENABLED env var: ${NFS_ENABLED:-not set}"
+
+if [ -d "/mnt/nzbwebdav" ]; then
+    echo "/mnt/nzbwebdav directory exists"
+    ls -la /mnt/nzbwebdav/ || echo "Cannot list /mnt/nzbwebdav contents"
+else
+    echo "/mnt/nzbwebdav directory does not exist - creating it"
+    mkdir -p /mnt/nzbwebdav
+    chmod 755 /mnt/nzbwebdav
+    chown "$PUID:$PGID" /mnt/nzbwebdav
+fi
+
+# Check if FUSE is mounted
+mount | grep nzbwebdav || echo "No FUSE mount found"
+echo "=== END FUSE DEBUG ==="
+
 # Run backend as appuser in background
 gosu "$USER_NAME" ./NzbWebDAV &
 BACKEND_PID=$!
