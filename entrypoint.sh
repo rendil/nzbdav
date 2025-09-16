@@ -199,8 +199,23 @@ while true; do
                 echo "Warning: FUSE is not mounted at ${NFS_EXPORT_PATH}"
             fi
             
-            # Create NFS exports file
-            echo "${NFS_EXPORT_PATH} *(ro,sync,no_subtree_check,no_root_squash,insecure,crossmnt,fsid=0)" > /etc/exports
+            # Create a bind mount that NFS can access
+            echo "Creating bind mount for NFS access..."
+            mkdir -p /nfs-export
+            chown ubuntu:ubuntu /nfs-export
+            
+            # Wait a moment and try to bind mount the FUSE filesystem to a location NFS can access
+            if gosu ubuntu mount --bind "${NFS_EXPORT_PATH}" /nfs-export 2>/dev/null; then
+                echo "Bind mount successful - using /nfs-export for NFS"
+                NFS_ACTUAL_PATH="/nfs-export"
+            else
+                echo "Bind mount failed - using original path"
+                NFS_ACTUAL_PATH="${NFS_EXPORT_PATH}"
+            fi
+            
+            # Create NFS exports file with the accessible path
+            echo "${NFS_ACTUAL_PATH} *(ro,sync,no_subtree_check,no_root_squash,insecure,crossmnt,fsid=0)" > /etc/exports
+            echo "NFS will export: ${NFS_ACTUAL_PATH}"
             
             # Try running NFS services as ubuntu user (since FUSE is accessible to ubuntu)
             echo "Starting NFS services as ubuntu user..."
