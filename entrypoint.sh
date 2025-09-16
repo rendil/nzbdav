@@ -126,8 +126,8 @@ SLEEP_PID=$!
 
 echo "=== END FUSE DEBUG ==="
 
-# Run backend as root in background (required for FUSE mounting with proper permissions)
-./NzbWebDAV &
+# Run backend as appuser in background
+gosu "$USER_NAME" ./NzbWebDAV &
 BACKEND_PID=$!
 
 # Start NFS server if enabled (after backend starts and FUSE is mounted)
@@ -192,6 +192,8 @@ while true; do
             export NFS_EXPORT_0="${NFS_EXPORT_PATH} *(ro,sync,no_subtree_check,no_root_squash,insecure,crossmnt,fsid=0)"
             export NFS_PORT_MOUNTD=33333
             export NFS_LOG_LEVEL=DEBUG
+            export NFS_VERSION=4
+            export NFS_DISABLE_VERSION_3=true
             
             # Remove existing empty /etc/exports so the script uses environment variables
             echo "Removing existing /etc/exports to use environment variables..."
