@@ -118,6 +118,12 @@ fi
 
 # Check if FUSE is mounted
 mount | grep nzbwebdav || echo "No FUSE mount found"
+
+# Add a delay to let .NET services start, then check again
+echo "Waiting 10 seconds for .NET FUSE service to start..."
+sleep 10 &
+SLEEP_PID=$!
+
 echo "=== END FUSE DEBUG ==="
 
 # Run backend as appuser in background
@@ -138,6 +144,21 @@ while true; do
     echo "Checking backend health: $BACKEND_URL/health ..."
     if curl -s -o /dev/null -w "%{http_code}" "$BACKEND_URL/health" | grep -q "^200$"; then
         echo "Backend is healthy."
+        
+        # Check if FUSE mounted after backend startup
+        echo "=== POST-STARTUP FUSE CHECK ==="
+        mount | grep nzbwebdav || echo "FUSE still not mounted after backend startup"
+        if [ -d "${NFS_EXPORT_PATH:-/mnt/nzbwebdav}" ]; then
+            ls -la "${NFS_EXPORT_PATH:-/mnt/nzbwebdav}/" 2>/dev/null || echo "Cannot access FUSE mount point"
+        fi
+        
+        # Check if backend process is running
+        if kill -0 "$BACKEND_PID" 2>/dev/null; then
+            echo "Backend process (PID $BACKEND_PID) is running"
+        else
+            echo "Backend process (PID $BACKEND_PID) is not running - this could be why FUSE isn't mounting"
+        fi
+        echo "=== END POST-STARTUP FUSE CHECK ==="
         
         # Start NFS server if enabled (now that backend is healthy and FUSE should be mounted)
         if [ "${NFS_ENABLED:-false}" = "true" ] && [ -n "${NFS_EXPORT_PATH:-}" ]; then
