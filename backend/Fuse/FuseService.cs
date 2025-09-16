@@ -43,7 +43,7 @@ public class FuseService : BackgroundService
             try
             {
                 // Test if we can at least load the FUSE library
-                var testResult = FuseDotNet.Fuse.Mount(null, new string[] { "--help" });
+                FuseDotNet.Fuse.Mount(null, new string[] { "--help" });
                 _logger.LogDebug("FUSE library test passed");
             }
             catch (DllNotFoundException)
