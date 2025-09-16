@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   nzbwebdav:
     # Your existing nzbwebdav service
@@ -15,7 +13,7 @@ services:
       - PGID=1000
     volumes:
       # Mount point for FUSE filesystem that will be shared via NFS
-      - nzbwebdav-fuse:/mnt/nzbwebdav:shared
+      - nzbwebdav-fuse:/mnt/nzbwebdav
       - /root/nzbdav:/config
       - /data/streaming:/data/streaming
     privileged: true # Required for FUSE operations

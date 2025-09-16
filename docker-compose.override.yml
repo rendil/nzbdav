@@ -15,8 +15,8 @@ services:
       - "8080:8080"
     environment:
       # Enable FUSE filesystem
-      - FUSE_ENABLED: "true"
-      - FUSE_MOUNT_POINT: "/mnt/nzbwebdav"
+      - FUSE_ENABLED=true
+      - FUSE_MOUNT_POINT=/mnt/nzbwebdav
       - PUID=1000
       - PGID=1000
     volumes:
@@ -55,9 +55,9 @@ services:
       - ./nfs-exports.txt:/etc/exports:ro
     environment:
       # NFS export configuration as environment variables (alternative to exports file)
-      NFS_EXPORT_0: "/nzbwebdav *(ro,sync,no_subtree_check,no_root_squash,insecure,crossmnt)"
+      - NFS_EXPORT_0=/nzbwebdav *(ro,sync,no_subtree_check,no_root_squash,insecure,crossmnt)
       # Optional: debug logging
-      # NFS_LOG_LEVEL: DEBUG
+      # - NFS_LOG_LEVEL=DEBUG
     depends_on:
       - nzbwebdav
     healthcheck:
