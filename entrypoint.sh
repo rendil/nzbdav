@@ -193,6 +193,13 @@ while true; do
             export NFS_PORT_MOUNTD=33333
             export NFS_LOG_LEVEL=DEBUG
             
+            # Remove existing empty /etc/exports so the script uses environment variables
+            echo "Removing existing /etc/exports to use environment variables..."
+            rm -f /etc/exports
+            
+            # Verify the export environment variable
+            echo "NFS_EXPORT_0 = ${NFS_EXPORT_0}"
+            
             # Start the professional NFS server in background
             echo "Starting professional NFS server with ehough/docker-nfs-server script..."
             /entrypoint-nfs.sh &
