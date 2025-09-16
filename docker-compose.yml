@@ -4,6 +4,8 @@ services:
   nzbwebdav:
     # Your existing nzbwebdav service
     build: .
+    ports:
+      - "3000:3000"
     environment:
       # Enable FUSE filesystem
       - FUSE_ENABLED=true

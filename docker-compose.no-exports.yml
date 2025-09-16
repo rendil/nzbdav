@@ -7,11 +7,11 @@
 #
 # Or rename this file to docker-compose.override.yml to have it automatically included
 
-version: "3.8"
-
 services:
   # Extend your existing nzbwebdav service
   nzbwebdav:
+    ports:
+      - "3000:3000"
     environment:
       # Enable FUSE filesystem
       FUSE_ENABLED: "true"
