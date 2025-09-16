@@ -172,18 +172,28 @@ while true; do
             if mount | grep -q "nzbwebdav on ${NFS_EXPORT_PATH}"; then
                 echo "FUSE is mounted at ${NFS_EXPORT_PATH}"
                 
+                # Show mount options for debugging
+                echo "FUSE mount options:"
+                mount | grep nzbwebdav
+                
                 # Try to access the FUSE mount as the ubuntu user
+                echo "Testing access as ubuntu user..."
                 if sudo -u ubuntu ls "${NFS_EXPORT_PATH}" > /dev/null 2>&1; then
                     echo "FUSE mount is accessible by ubuntu user"
+                    sudo -u ubuntu ls -la "${NFS_EXPORT_PATH}/" | head -5
                 else
                     echo "FUSE mount access issue for ubuntu user"
+                    sudo -u ubuntu ls "${NFS_EXPORT_PATH}" 2>&1 | head -3 || true
                 fi
                 
                 # Try to access as root for NFS
+                echo "Testing access as root..."
                 if ls "${NFS_EXPORT_PATH}" > /dev/null 2>&1; then
                     echo "FUSE mount is accessible by root (good for NFS)"
+                    ls -la "${NFS_EXPORT_PATH}/" | head -5
                 else
                     echo "FUSE mount access issue for root - this may cause NFS problems"
+                    ls "${NFS_EXPORT_PATH}" 2>&1 | head -3 || true
                 fi
             else
                 echo "Warning: FUSE is not mounted at ${NFS_EXPORT_PATH}"
