@@ -168,14 +168,25 @@ while true; do
             sleep 3
             
             # Check if FUSE mount is accessible and fix permissions if needed
-            if [ -d "${NFS_EXPORT_PATH}" ]; then
-                # Try to access the directory as root to verify FUSE is working
-                ls "${NFS_EXPORT_PATH}" > /dev/null 2>&1 || echo "FUSE mount may not be ready yet"
+            echo "Checking FUSE mount accessibility..."
+            if mount | grep -q "nzbwebdav on ${NFS_EXPORT_PATH}"; then
+                echo "FUSE is mounted at ${NFS_EXPORT_PATH}"
                 
-                # Ensure NFS can access the mount point
-                chmod 755 "${NFS_EXPORT_PATH}" || echo "Could not set permissions on ${NFS_EXPORT_PATH}"
+                # Try to access the FUSE mount as the ubuntu user
+                if sudo -u ubuntu ls "${NFS_EXPORT_PATH}" > /dev/null 2>&1; then
+                    echo "FUSE mount is accessible by ubuntu user"
+                else
+                    echo "FUSE mount access issue for ubuntu user"
+                fi
+                
+                # Try to access as root for NFS
+                if ls "${NFS_EXPORT_PATH}" > /dev/null 2>&1; then
+                    echo "FUSE mount is accessible by root (good for NFS)"
+                else
+                    echo "FUSE mount access issue for root - this may cause NFS problems"
+                fi
             else
-                echo "Warning: ${NFS_EXPORT_PATH} does not exist - FUSE may not be mounted"
+                echo "Warning: FUSE is not mounted at ${NFS_EXPORT_PATH}"
             fi
             
             # Create NFS exports file
