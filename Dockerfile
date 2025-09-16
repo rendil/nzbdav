@@ -31,15 +31,6 @@ WORKDIR /app
 ENV LD_LIBRARY_PATH="/usr/lib:/lib:/usr/local/lib:/usr/lib/x86_64-linux-gnu"
 
 # Prepare environment with Ubuntu packages
-# remove the default config files
-RUN rm -v /etc/idmapd.conf /etc/exports
-
-# http://wiki.linux-nfs.org/wiki/index.php/Nfsv4_configuration
-RUN mkdir -p /var/lib/nfs/rpc_pipefs                                                     && \
-    mkdir -p /var/lib/nfs/v4recovery                                                     && \
-    echo "rpc_pipefs  /var/lib/nfs/rpc_pipefs  rpc_pipefs  defaults  0  0" >> /etc/fstab && \
-    echo "nfsd        /proc/fs/nfsd            nfsd        defaults  0  0" >> /etc/fstab
-
 RUN mkdir /config && \
     mkdir -p /mnt/nzbwebdav && \
     apt-get update && \
@@ -54,6 +45,12 @@ RUN mkdir /config && \
         libfuse3-3 \
         libfuse3-dev \
         nfs-utils && \
+        # http://wiki.linux-nfs.org/wiki/index.php/Nfsv4_configuration
+    mkdir -p /var/lib/nfs/rpc_pipefs                                                     && \
+    mkdir -p /var/lib/nfs/v4recovery                                                     && \
+    echo "rpc_pipefs  /var/lib/nfs/rpc_pipefs  rpc_pipefs  defaults  0  0" >> /etc/fstab && \
+    echo "nfsd        /proc/fs/nfsd            nfsd        defaults  0  0" >> /etc/fstab && \
+
     echo "=== FUSE Installation Debug ===" && \
     # Show what packages were installed \
     dpkg -l | grep fuse && \
