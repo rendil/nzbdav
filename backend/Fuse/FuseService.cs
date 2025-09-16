@@ -109,11 +109,16 @@ public class FuseService : BackgroundService
             // Mount options for FUSE
             var options = new string[] 
             { 
+                "nzbwebdav", // program name
                 "-f", // foreground mode
-                "-o", "allow_other,default_permissions,ro,fsname=nzbwebdav,subtype=nzbwebdav" // combined options
+                "-o", "allow_other", 
+                "-o", "default_permissions", 
+                "-o", "ro",
+                "-o", "fsname=nzbwebdav",
+                _mountPoint // mount point
             };
 
-            _logger.LogInformation("Mounting FUSE filesystem...");
+            _logger.LogInformation("Mounting FUSE filesystem with options: {Options}", string.Join(" ", options));
             
             // Debug: Check if FUSE libraries are available at runtime
             _logger.LogInformation("=== Runtime FUSE Debug ===");

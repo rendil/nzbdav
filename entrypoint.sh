@@ -202,29 +202,43 @@ while true; do
             # Create NFS exports file
             echo "${NFS_EXPORT_PATH} *(ro,sync,no_subtree_check,no_root_squash,insecure,crossmnt,fsid=0)" > /etc/exports
             
-            # Start RPC services in proper order
-            echo "Starting rpcbind..."
-            # Kill any existing rpcbind and start fresh
-            pkill -f rpcbind || true
-            rpcbind -f &
+            # Try running NFS services as ubuntu user (since FUSE is accessible to ubuntu)
+            echo "Starting NFS services as ubuntu user..."
+            
+            # Start RPC services as ubuntu user
+            gosu ubuntu rpcbind -f &
             sleep 2
             
             # Verify rpcbind is running
             if ! pgrep rpcbind > /dev/null; then
-                echo "Warning: rpcbind failed to start"
+                echo "Warning: rpcbind failed to start as ubuntu user, trying as root..."
+                # Fallback to root
+                pkill -f rpcbind || true
+                rpcbind -f &
+                sleep 2
             else
-                echo "rpcbind started successfully"
+                echo "rpcbind started successfully as ubuntu user"
             fi
             
-            echo "Starting NFS services..."
-            # Start nfsd first
+            echo "Starting NFS daemon services..."
+            # Start nfsd (must be run as root for kernel module access)
             rpc.nfsd 8
             
-            # Export filesystems
-            exportfs -rav
+            # Export filesystems (try as ubuntu user first, then root)
+            if gosu ubuntu exportfs -rav 2>/dev/null; then
+                echo "Exports successful as ubuntu user"
+            else
+                echo "Exports as ubuntu user failed, trying as root..."
+                exportfs -rav
+            fi
             
-            # Start mountd with fixed port
-            rpc.mountd --no-nfs-version 2 --no-nfs-version 3 --port 33333 &
+            # Start mountd (try as ubuntu user first)
+            if gosu ubuntu rpc.mountd --no-nfs-version 2 --no-nfs-version 3 --port 33333 2>/dev/null &; then
+                echo "mountd started as ubuntu user"
+            else
+                echo "mountd as ubuntu user failed, trying as root..."
+                rpc.mountd --no-nfs-version 2 --no-nfs-version 3 --port 33333 &
+            fi
             
             # Give services time to register
             sleep 2
