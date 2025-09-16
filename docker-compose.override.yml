@@ -12,13 +12,18 @@ services:
   nzbwebdav:
     ports:
       - "3000:3000"
+      - "8080:8080"
     environment:
       # Enable FUSE filesystem
-      FUSE_ENABLED: "true"
-      FUSE_MOUNT_POINT: "/mnt/nzbwebdav"
+      - FUSE_ENABLED: "true"
+      - FUSE_MOUNT_POINT: "/mnt/nzbwebdav"
+      - PUID=1000
+      - PGID=1000
     volumes:
       # Add FUSE mount point (if not already in your main compose file)
       - fuse-mount:/mnt/nzbwebdav
+      - /root/nzbdav:/config
+      - /data/streaming:/data/streaming
     privileged: true # Required for FUSE operations
     devices:
       - /dev/fuse:/dev/fuse

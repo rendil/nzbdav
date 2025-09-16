@@ -6,15 +6,18 @@ services:
     build: .
     ports:
       - "3000:3000"
+      - "8080:8080"
     environment:
       # Enable FUSE filesystem
       - FUSE_ENABLED=true
       - FUSE_MOUNT_POINT=/mnt/nzbwebdav
-      # Add other existing environment variables here
+      - PUID=1000
+      - PGID=1000
     volumes:
       # Mount point for FUSE filesystem that will be shared via NFS
       - nzbwebdav-fuse:/mnt/nzbwebdav:shared
-      # Add other existing volumes here
+      - /root/nzbdav:/config
+      - /data/streaming:/data/streaming
     privileged: true # Required for FUSE operations
     devices:
       - /dev/fuse:/dev/fuse # Required for FUSE
