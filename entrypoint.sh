@@ -162,12 +162,12 @@ while true; do
         
         # Start NFS server if enabled (now that backend is healthy and FUSE should be mounted)
         if [ "${NFS_ENABLED:-false}" = "true" ] && [ -n "${NFS_EXPORT_PATH:-}" ]; then
-            echo "Starting NFS server for path: ${NFS_EXPORT_PATH}"
+            echo "Starting professional NFS server for path: ${NFS_EXPORT_PATH}"
             
-            # Wait for FUSE to be fully ready and check if mount point is accessible
+            # Wait for FUSE to be fully ready
             sleep 3
             
-            # Check if FUSE mount is accessible and fix permissions if needed
+            # Check if FUSE mount is accessible
             echo "Checking FUSE mount accessibility..."
             if mount | grep -q "nzbwebdav on ${NFS_EXPORT_PATH}"; then
                 echo "FUSE is mounted at ${NFS_EXPORT_PATH}"
@@ -176,127 +176,32 @@ while true; do
                 echo "FUSE mount options:"
                 mount | grep nzbwebdav
                 
-                # Try to access the FUSE mount as the ubuntu user
-                echo "Testing access as ubuntu user..."
-                if gosu ubuntu ls "${NFS_EXPORT_PATH}" > /dev/null 2>&1; then
-                    echo "FUSE mount is accessible by ubuntu user"
-                    gosu ubuntu ls -la "${NFS_EXPORT_PATH}/" | head -5
-                else
-                    echo "FUSE mount access issue for ubuntu user"
-                    gosu ubuntu ls "${NFS_EXPORT_PATH}" 2>&1 | head -3 || true
-                fi
-                
-                # Try to access as root for NFS
-                echo "Testing access as root..."
+                # Test access to FUSE mount
+                echo "Testing access to FUSE mount..."
                 if ls "${NFS_EXPORT_PATH}" > /dev/null 2>&1; then
-                    echo "FUSE mount is accessible by root (good for NFS)"
-                    ls -la "${NFS_EXPORT_PATH}/" | head -5
+                    echo "FUSE mount is accessible"
+                    ls -la "${NFS_EXPORT_PATH}/" | head -3
                 else
-                    echo "FUSE mount access issue for root - this may cause NFS problems"
-                    ls "${NFS_EXPORT_PATH}" 2>&1 | head -3 || true
+                    echo "Warning: FUSE mount access issue"
                 fi
             else
                 echo "Warning: FUSE is not mounted at ${NFS_EXPORT_PATH}"
             fi
             
-            # Create a symlink that NFS can access
-            echo "Creating symlink for NFS access..."
+            # Set environment variables for the NFS server script
+            export NFS_EXPORT_0="${NFS_EXPORT_PATH} *(ro,sync,no_subtree_check,no_root_squash,insecure,crossmnt,fsid=0)"
+            export NFS_PORT_MOUNTD=33333
+            export NFS_LOG_LEVEL=DEBUG
             
-            # Try creating a symlink as ubuntu user first
-            if gosu ubuntu ln -sf "${NFS_EXPORT_PATH}" /nfs-export 2>/dev/null; then
-                echo "Symlink created as ubuntu user - using /nfs-export for NFS"
-                NFS_ACTUAL_PATH="/nfs-export"
-            else
-                echo "Symlink creation failed, trying alternate approach..."
-                # Just use the original path but ensure directory exists
-                mkdir -p "$(dirname "${NFS_EXPORT_PATH}")" 2>/dev/null || true
-                NFS_ACTUAL_PATH="${NFS_EXPORT_PATH}"
-            fi
+            # Start the professional NFS server in background
+            echo "Starting professional NFS server with ehough/docker-nfs-server script..."
+            /entrypoint-nfs.sh &
+            NFS_PID=$!
             
-            # Create NFS exports file with the accessible path
-            echo "${NFS_ACTUAL_PATH} *(ro,sync,no_subtree_check,no_root_squash,insecure,crossmnt,fsid=0)" > /etc/exports
-            echo "NFS will export: ${NFS_ACTUAL_PATH}"
+            # Give NFS server time to start
+            sleep 5
             
-            # Try running NFS services as ubuntu user (since FUSE is accessible to ubuntu)
-            echo "Starting NFS services as ubuntu user..."
-            
-            # Start RPC services as ubuntu user
-            gosu ubuntu rpcbind -f &
-            sleep 2
-            
-            # Verify rpcbind is running
-            if ! pgrep rpcbind > /dev/null; then
-                echo "Warning: rpcbind failed to start as ubuntu user, trying as root..."
-                # Fallback to root
-                pkill -f rpcbind || true
-                rpcbind -f &
-                sleep 2
-            else
-                echo "rpcbind started successfully as ubuntu user"
-            fi
-            
-            echo "Starting NFS daemon services..."
-            # Start nfsd (must be run as root for kernel module access)
-            rpc.nfsd 8
-            
-            # Fix NFS system file permissions for ubuntu user
-            mkdir -p /var/lib/nfs
-            chown -R ubuntu:ubuntu /var/lib/nfs /etc/exports
-            
-            # Export filesystems as ubuntu user (who can access FUSE)
-            echo "Running exportfs as ubuntu user..."
-            if gosu ubuntu exportfs -rav; then
-                echo "Exports successful as ubuntu user"
-                EXPORT_SUCCESS=true
-            else
-                echo "Exports as ubuntu user failed, trying root with manual export table..."
-                # Create a manual export entry since direct export fails
-                echo "/mnt/nzbwebdav *(ro,sync,no_subtree_check,no_root_squash,insecure,crossmnt,fsid=0)" > /var/lib/nfs/etab
-                chown ubuntu:ubuntu /var/lib/nfs/etab
-                EXPORT_SUCCESS=false
-            fi
-            
-            # Create a dummy export that root can access for mountd initialization
-            echo "Creating dummy export for mountd registration..."
-            mkdir -p /tmp/nfs-dummy
-            chmod 755 /tmp/nfs-dummy
-            echo "# Dummy export for mountd registration" > /etc/exports.tmp
-            echo "/tmp/nfs-dummy *(ro,sync,no_subtree_check,no_root_squash,insecure)" >> /etc/exports.tmp
-            echo "/mnt/nzbwebdav *(ro,sync,no_subtree_check,no_root_squash,insecure,crossmnt,fsid=0)" >> /etc/exports.tmp
-            
-            # Use the temporary exports file
-            cp /etc/exports.tmp /etc/exports
-            
-            # Start mountd as root with the accessible dummy export
-            echo "Starting mountd as root..."
-            rpc.mountd --no-nfs-version 2 --no-nfs-version 3 --port 33333 &
-            MOUNTD_PID=$!
-            
-            # Give mountd time to register and then check
-            sleep 3
-            
-            if rpcinfo -p localhost | grep -q mountd; then
-                echo "mountd registered successfully with portmapper"
-                # Now update exports to include the real FUSE export handled by ubuntu user
-                echo "Updating exports with FUSE mount..."
-                gosu ubuntu exportfs -rav /mnt/nzbwebdav || echo "Direct FUSE export update failed"
-            else
-                echo "mountd registration failed - NFS may not work properly"
-            fi
-            
-            # Give services time to register
-            sleep 2
-            
-            echo "NFS server started and exporting ${NFS_EXPORT_PATH}"
-            
-            # Show exports (with retry)
-            for i in 1 2 3; do
-                if showmount -e localhost 2>/dev/null; then
-                    break
-                fi
-                echo "Waiting for NFS services to be ready... (attempt $i/3)"
-                sleep 2
-            done
+            echo "NFS server started with PID ${NFS_PID}"
         fi
         
         break
