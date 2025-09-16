@@ -32,10 +32,16 @@ public class FuseService : BackgroundService
     {
         try
         {
+            _logger.LogInformation("=== FUSE Service Starting ===");
+            
             _mountPoint = GetMountPoint();
+            _logger.LogInformation("Mount point from GetMountPoint(): {MountPoint}", _mountPoint ?? "null");
+            
             if (_mountPoint == null)
             {
                 _logger.LogInformation("FUSE filesystem disabled - no mount point configured");
+                _logger.LogInformation("FUSE_ENABLED env var: {FuseEnabled}", Environment.GetEnvironmentVariable("FUSE_ENABLED"));
+                _logger.LogInformation("FUSE_MOUNT_POINT env var: {FuseMountPoint}", Environment.GetEnvironmentVariable("FUSE_MOUNT_POINT"));
                 return;
             }
 

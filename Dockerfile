@@ -32,6 +32,7 @@ ENV LD_LIBRARY_PATH="/usr/lib:/lib:/usr/local/lib:/usr/lib/x86_64-linux-gnu"
 
 # Prepare environment with Ubuntu packages
 RUN mkdir /config && \
+    mkdir -p /mnt/nzbwebdav && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
         nodejs \

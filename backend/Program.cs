@@ -86,10 +86,18 @@ class Program
             .AddScoped<SabApiController>();
 
         // Add FUSE service if enabled
-        if (configManager.IsFuseEnabled())
+        var fuseEnabled = configManager.IsFuseEnabled();
+        var fuseEnvVar = Environment.GetEnvironmentVariable("FUSE_ENABLED");
+        Log.Information("FUSE enabled check: configManager={FuseEnabled}, FUSE_ENABLED env var={FuseEnvVar}", fuseEnabled, fuseEnvVar);
+        
+        if (fuseEnabled)
         {
             builder.Services.AddHostedService<FuseService>();
-            Log.Information("FUSE filesystem service enabled");
+            Log.Information("FUSE filesystem service enabled and registered");
+        }
+        else
+        {
+            Log.Information("FUSE filesystem service disabled");
         }
 
         builder.Services.AddNWebDav(opts =>
