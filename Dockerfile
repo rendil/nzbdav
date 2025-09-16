@@ -46,7 +46,8 @@ RUN mkdir /config && \
         libfuse3-dev \
         nfs-kernel-server \
         rpcbind \
-        libcap2-bin && \
+        libcap2-bin \
+        unzip && \
         # http://wiki.linux-nfs.org/wiki/index.php/Nfsv4_configuration
     mkdir -p /var/lib/nfs/rpc_pipefs                                                     && \
     mkdir -p /var/lib/nfs/v4recovery                                                     && \
@@ -54,7 +55,17 @@ RUN mkdir /config && \
     echo "nfsd        /proc/fs/nfsd            nfsd        defaults  0  0" >> /etc/fstab && \
 
     echo "=== RCLONE Installation Debug ===" && \
-    (curl https://rclone.org/install.sh | bash) && \
+    curl -O https://downloads.rclone.org/rclone-current-linux-amd64.zip && \
+    unzip rclone-current-linux-amd64.zip && \
+    cd rclone-*-linux-amd64 && \
+    cp rclone /usr/bin/ && \
+    chown root:root /usr/bin/rclone && \
+    chmod 755 /usr/bin/rclone && \
+    cd .. && \
+    rm -rf rclone-* && \
+    echo "Rclone installed:" && \
+    which rclone && \
+    rclone version && \
     rclone config create nzbdav webdav \
       url=http://localhost:8080 \
       vendor=other \

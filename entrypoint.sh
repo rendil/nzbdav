@@ -242,7 +242,7 @@ cd /app/frontend
 gosu "$USER_NAME" npm run start &
 FRONTEND_PID=$!
 
-/usr/bin/rclone serve nfs nzbdav: --addr 0.0.0.0:33333 \
+rclone serve nfs nzbdav: --addr 0.0.0.0:33333 \
     --vfs-cache-mode=full \
     --buffer-size=1024 \
     --dir-cache-time=1s \
