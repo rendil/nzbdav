@@ -239,16 +239,21 @@ while true; do
             # Start nfsd (must be run as root for kernel module access)
             rpc.nfsd 8
             
-            # Change ownership of exports file to ubuntu so it can read it
-            chown ubuntu:ubuntu /etc/exports
+            # Fix NFS system file permissions for ubuntu user
+            mkdir -p /var/lib/nfs
+            chown -R ubuntu:ubuntu /var/lib/nfs /etc/exports
             
             # Export filesystems as ubuntu user (who can access FUSE)
             echo "Running exportfs as ubuntu user..."
             if gosu ubuntu exportfs -rav; then
                 echo "Exports successful as ubuntu user"
+                EXPORT_SUCCESS=true
             else
-                echo "Exports as ubuntu user failed, trying as root..."
-                exportfs -rav || echo "Root export also failed"
+                echo "Exports as ubuntu user failed, trying root with manual export table..."
+                # Create a manual export entry since direct export fails
+                echo "/mnt/nzbwebdav *(ro,sync,no_subtree_check,no_root_squash,insecure,crossmnt,fsid=0)" > /var/lib/nfs/etab
+                chown ubuntu:ubuntu /var/lib/nfs/etab
+                EXPORT_SUCCESS=false
             fi
             
             # Start mountd (try as ubuntu user first)
