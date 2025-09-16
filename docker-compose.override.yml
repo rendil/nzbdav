@@ -18,7 +18,7 @@ services:
       FUSE_MOUNT_POINT: "/mnt/nzbwebdav"
     volumes:
       # Add FUSE mount point (if not already in your main compose file)
-      - fuse-mount:/mnt/nzbwebdav:shared
+      - fuse-mount:/mnt/nzbwebdav
     privileged: true # Required for FUSE operations
     devices:
       - /dev/fuse:/dev/fuse
