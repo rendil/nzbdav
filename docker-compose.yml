@@ -6,7 +6,9 @@ services:
       - "3000:3000"
       - "8080:8080"
       # NFS ports
+      - "111:111" # RPC portmapper
       - "2049:2049" # NFSv4
+      - "33333:33333" # NFS mountd (fixed port)
     environment:
       # Enable FUSE filesystem
       - FUSE_ENABLED=true

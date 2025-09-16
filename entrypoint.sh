@@ -142,8 +142,17 @@ while true; do
             
             # Start RPC services in proper order
             echo "Starting rpcbind..."
+            # Kill any existing rpcbind and start fresh
+            pkill -f rpcbind || true
             rpcbind -f &
-            sleep 1
+            sleep 2
+            
+            # Verify rpcbind is running
+            if ! pgrep rpcbind > /dev/null; then
+                echo "Warning: rpcbind failed to start"
+            else
+                echo "rpcbind started successfully"
+            fi
             
             echo "Starting NFS services..."
             # Start nfsd first
@@ -152,8 +161,8 @@ while true; do
             # Export filesystems
             exportfs -rav
             
-            # Start mountd last
-            rpc.mountd --no-nfs-version 2 --no-nfs-version 3 &
+            # Start mountd with fixed port
+            rpc.mountd --no-nfs-version 2 --no-nfs-version 3 --port 33333 &
             
             # Give services time to register
             sleep 2
