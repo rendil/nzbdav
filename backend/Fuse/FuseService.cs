@@ -106,12 +106,12 @@ public class FuseService : BackgroundService
 
             _fileSystem = new NzbWebDavFuseFileSystem(logger, dbClient, _configManager, usenetClient);
 
-            // Mount options for FUSE
+            // Mount options for FUSE - allow both root and user access for NFS compatibility
             var options = new string[] 
             { 
                 "nzbwebdav", // program name
                 "-f", // foreground mode
-                "-o", "allow_other", 
+                "-o", "allow_other,allow_root,uid=0,gid=0", 
                 "-o", "default_permissions", 
                 "-o", "ro",
                 "-o", "fsname=nzbwebdav",
