@@ -233,7 +233,8 @@ while true; do
             fi
             
             # Start mountd (try as ubuntu user first)
-            if gosu ubuntu rpc.mountd --no-nfs-version 2 --no-nfs-version 3 --port 33333 2>/dev/null &; then
+            echo "Starting mountd as ubuntu user..."
+            if gosu ubuntu rpc.mountd --no-nfs-version 2 --no-nfs-version 3 --port 33333 2>/dev/null; then
                 echo "mountd started as ubuntu user"
             else
                 echo "mountd as ubuntu user failed, trying as root..."
