@@ -130,7 +130,6 @@ if [ "${NFS_ENABLED:-false}" = "true" ] && command -v rclone >/dev/null 2>&1; th
         --vfs-cache-max-age=180m \
         --links \
         --use-cookies \
-        --allow-other \
         --uid=1000 \
         --gid=1000 &
     RCLONE_PID=$!
