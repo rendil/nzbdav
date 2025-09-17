@@ -6,14 +6,14 @@ wait_either() {
     local pid3=$3
 
     while true; do
-        if ! kill -0 "$pid1" 2>/dev/null; then
+        if [ -n "$pid1" ] && ! kill -0 "$pid1" 2>/dev/null; then
             wait "$pid1"
             EXITED_PID=$pid1
             REMAINING_PIDS=($pid2 $pid3)
             return $?
         fi
 
-        if ! kill -0 "$pid2" 2>/dev/null; then
+        if [ -n "$pid2" ] && ! kill -0 "$pid2" 2>/dev/null; then
             wait "$pid2"
             EXITED_PID=$pid2
             REMAINING_PIDS=($pid1 $pid3)
@@ -53,34 +53,14 @@ trap terminate TERM INT
 PUID=${PUID:-1000}
 PGID=${PGID:-1000}
 
-# Create group if it doesn't exist, or use existing one with same GID
-if ! grep -q "^appgroup:" /etc/group; then
-    if grep -q ":$PGID:" /etc/group; then
-        # Use existing group with that GID
-        EXISTING_GROUP=$(grep ":$PGID:" /etc/group | cut -d: -f1)
-        echo "Using existing group $EXISTING_GROUP with GID $PGID"
-        GROUP_NAME="$EXISTING_GROUP"
-    else
-        addgroup -g "$PGID" appgroup
-        GROUP_NAME="appgroup"
-    fi
-else
-    GROUP_NAME="appgroup"
+# Create group if it doesn't exist
+if ! getent group appgroup >/dev/null; then
+    addgroup -g "$PGID" appgroup
 fi
 
-# Create user if it doesn't exist, or use existing one with same UID
+# Create user if it doesn't exist
 if ! id appuser >/dev/null 2>&1; then
-    if id "$PUID" >/dev/null 2>&1; then
-        # Use existing user with that UID
-        EXISTING_USER=$(id -nu "$PUID")
-        echo "Using existing user $EXISTING_USER with UID $PUID"
-        USER_NAME="$EXISTING_USER"
-    else
-        adduser -D -u "$PUID" -G "$GROUP_NAME" appuser
-        USER_NAME="appuser"
-    fi
-else
-    USER_NAME="appuser"
+    adduser -D -H -u "$PUID" -G appgroup appuser
 fi
 
 # Set environment variables
@@ -89,16 +69,16 @@ if [ -z "${BACKEND_URL}" ]; then
 fi
 
 if [ -z "${FRONTEND_BACKEND_API_KEY}" ]; then
-    export FRONTEND_BACKEND_API_KEY=$(head -c 32 /dev/urandom | od -A n -t x1 | tr -d ' \n')
+    export FRONTEND_BACKEND_API_KEY=$(head -c 32 /dev/urandom | hexdump -ve '1/1 "%.2x"')
 fi
 
 # Change permissions on /config directory to the given PUID and PGID
 chown $PUID:$PGID /config
 
 # Run backend database migration
-cd /app
+cd /app/backend
 echo "Running database maintenance."
-su-exec "$USER_NAME" ./backend/NzbWebDAV --db-migration
+su-exec appuser ./NzbWebDAV --db-migration
 if [ $? -ne 0 ]; then
     echo "Database migration failed. Exiting with error code $?."
     exit $?
@@ -106,7 +86,7 @@ fi
 echo "Done with database maintenance."
 
 # Run backend as appuser in background
-su-exec "$USER_NAME" ./backend/NzbWebDAV &
+su-exec appuser ./NzbWebDAV &
 BACKEND_PID=$!
 
 # Wait for backend health check
@@ -134,11 +114,11 @@ done
 
 # Run frontend as appuser in background
 cd /app/frontend
-su-exec "$USER_NAME" npm run start &
+su-exec appuser npm run start &
 FRONTEND_PID=$!
 
-# Start rclone NFS server if enabled
-if [ "${NFS_ENABLED:-false}" = "true" ]; then
+# Start rclone NFS server if enabled and available
+if [ "${NFS_ENABLED:-false}" = "true" ] && command -v rclone >/dev/null 2>&1; then
     echo "Starting rclone NFS server..."
     
     # Wait a bit for backend to be fully ready
@@ -160,18 +140,31 @@ if [ "${NFS_ENABLED:-false}" = "true" ]; then
     
     echo "Rclone NFS server started with PID ${RCLONE_PID}"
 else
-    # If NFS is disabled, just wait for backend and frontend
+    # NFS is disabled or rclone not available
+    if [ "${NFS_ENABLED:-false}" = "true" ]; then
+        echo "NFS enabled but rclone not found - NFS server will not start"
+    else
+        echo "NFS disabled - backend only mode"
+    fi
     RCLONE_PID=""
 fi
 
 # Wait for processes to exit
-if [ -n "$RCLONE_PID" ]; then
+if [ -n "$RCLONE_PID" ] && [ -n "$FRONTEND_PID" ]; then
     # Wait for any of the three processes
     wait_either $BACKEND_PID $FRONTEND_PID $RCLONE_PID
     EXIT_CODE=$?
-else
-    # Only wait for backend and frontend
+elif [ -n "$RCLONE_PID" ]; then
+    # Wait for backend and rclone only
+    wait_either $BACKEND_PID "" $RCLONE_PID
+    EXIT_CODE=$?
+elif [ -n "$FRONTEND_PID" ]; then
+    # Wait for backend and frontend only
     wait_either $BACKEND_PID $FRONTEND_PID
+    EXIT_CODE=$?
+else
+    # Backend only
+    wait $BACKEND_PID
     EXIT_CODE=$?
 fi
 
