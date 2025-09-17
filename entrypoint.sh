@@ -54,14 +54,14 @@ PUID=${PUID:-1000}
 PGID=${PGID:-1000}
 
 # Create group if it doesn't exist, or use existing one with same GID
-if ! getent group appgroup >/dev/null; then
-    if getent group "$PGID" >/dev/null; then
+if ! grep -q "^appgroup:" /etc/group; then
+    if grep -q ":$PGID:" /etc/group; then
         # Use existing group with that GID
-        EXISTING_GROUP=$(getent group "$PGID" | cut -d: -f1)
+        EXISTING_GROUP=$(grep ":$PGID:" /etc/group | cut -d: -f1)
         echo "Using existing group $EXISTING_GROUP with GID $PGID"
         GROUP_NAME="$EXISTING_GROUP"
     else
-        groupadd -g "$PGID" appgroup
+        addgroup -g "$PGID" appgroup
         GROUP_NAME="appgroup"
     fi
 else
@@ -76,7 +76,7 @@ if ! id appuser >/dev/null 2>&1; then
         echo "Using existing user $EXISTING_USER with UID $PUID"
         USER_NAME="$EXISTING_USER"
     else
-        useradd -M -u "$PUID" -g "$PGID" appuser
+        adduser -D -u "$PUID" -G "$GROUP_NAME" appuser
         USER_NAME="appuser"
     fi
 else
@@ -96,9 +96,9 @@ fi
 chown $PUID:$PGID /config
 
 # Run backend database migration
-cd /app/backend
+cd /app
 echo "Running database maintenance."
-su-exec "$USER_NAME" ./NzbWebDAV --db-migration
+su-exec "$USER_NAME" ./backend/NzbWebDAV --db-migration
 if [ $? -ne 0 ]; then
     echo "Database migration failed. Exiting with error code $?."
     exit $?
@@ -106,7 +106,7 @@ fi
 echo "Done with database maintenance."
 
 # Run backend as appuser in background
-su-exec "$USER_NAME" ./NzbWebDAV &
+su-exec "$USER_NAME" ./backend/NzbWebDAV &
 BACKEND_PID=$!
 
 # Wait for backend health check
