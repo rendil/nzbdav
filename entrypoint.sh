@@ -98,7 +98,7 @@ chown $PUID:$PGID /config
 # Run backend database migration
 cd /app/backend
 echo "Running database maintenance."
-gosu "$USER_NAME" ./NzbWebDAV --db-migration
+su-exec "$USER_NAME" ./NzbWebDAV --db-migration
 if [ $? -ne 0 ]; then
     echo "Database migration failed. Exiting with error code $?."
     exit $?
@@ -106,7 +106,7 @@ fi
 echo "Done with database maintenance."
 
 # Run backend as appuser in background
-gosu "$USER_NAME" ./NzbWebDAV &
+su-exec "$USER_NAME" ./NzbWebDAV &
 BACKEND_PID=$!
 
 # Wait for backend health check
@@ -134,7 +134,7 @@ done
 
 # Run frontend as appuser in background
 cd /app/frontend
-gosu "$USER_NAME" npm run start &
+su-exec "$USER_NAME" npm run start &
 FRONTEND_PID=$!
 
 # Start rclone NFS server if enabled

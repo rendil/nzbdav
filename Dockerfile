@@ -23,20 +23,19 @@ RUN dotnet restore
 RUN dotnet publish -c Release -r linux-${TARGETARCH} -o ./publish
 
 # -------- Stage 3: Combined runtime image --------
-FROM mcr.microsoft.com/dotnet/aspnet:9.0-noble
+FROM mcr.microsoft.com/dotnet/aspnet:9.0-alpine
 
 WORKDIR /app
 
-# Prepare environment with Ubuntu packages
+# Prepare environment with Alpine packages
 RUN mkdir /config && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends \
+    apk add --no-cache \
         nodejs \
         npm \
         bash \
         curl \
         ffmpeg \
-        gosu \
+        su-exec \
         ca-certificates \
         unzip && \
     echo "=== RCLONE Installation Debug ===" && \
@@ -56,10 +55,7 @@ RUN mkdir /config && \
       vendor=other \
       user=nzbdav \
       pass=$(rclone obscure "nzbdav") && \
-    echo "=== End RCLONE Debug ===" && \
-    # Clean up \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    echo "=== End RCLONE Debug ==="
 
 # Copy frontend
 COPY --from=frontend-build /frontend/node_modules ./frontend/node_modules
