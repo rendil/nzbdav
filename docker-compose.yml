@@ -19,11 +19,9 @@ services:
     ports:
       - "2049:2049"
     environment:
-      - NFS_EXPORT_0='/nzbdav 192.168.10.0/24(rw,no_subtree_check)'
-      - NFS_EXPORT_1='/tmp 192.168.10.0/24(rw,no_subtree_check)'
+      - NFS_EXPORT_0=/nzbdav 192.168.10.0/24(rw,no_subtree_check)
     volumes:
       - streaming_media:/nzbdav
-      - ./tmp:/tmp
     cap_add:
       - SYS_ADMIN
     depends_on:
