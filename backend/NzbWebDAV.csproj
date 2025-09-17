@@ -9,7 +9,6 @@
 
     <ItemGroup>
       <PackageReference Include="FFMpegCore" Version="5.1.0" />
-      <PackageReference Include="LTRData.FuseDotNet" Version="1.0.0.10" />
       <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.0" />
       <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.4">
         <PrivateAssets>all</PrivateAssets>

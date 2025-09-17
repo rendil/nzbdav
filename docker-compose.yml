@@ -1,59 +1,15 @@
 services:
   nzbwebdav:
-    # Your existing nzbwebdav service
     build: .
     ports:
       - "3000:3000"
       - "8080:8080"
-      # NFS ports (standard ports, host services disabled)
-      - "111:111" # RPC portmapper
-      - "2049:2049" # NFSv4
-      - "33333:33333" # NFS mountd (fixed port)
+      - "2049:2049" # rclone NFS server
     environment:
-      # Enable FUSE filesystem
-      - FUSE_ENABLED=false
-      - FUSE_MOUNT_POINT=/mnt/nzbwebdav
-      - NFS_ENABLED=false
-      - NFS_EXPORT_PATH=/mnt/nzbwebdav
+      # Enable rclone NFS
+      - NFS_ENABLED=true
       - PUID=1000
       - PGID=1000
     volumes:
-      - /root/nzbdav:/config
-      - /data/streaming:/data/streaming # Comment out until path is configured
-    privileged: true # Required for FUSE operations
-    devices:
-      - /dev/fuse:/dev/fuse # Required for FUSE
-    cap_add:
-      - SYS_ADMIN # Required for FUSE operations
-
-
-  # nfs-server:
-  # image: erichough/nfs-server
-  # privileged: true
-  # restart: unless-stopped
-  # ports:
-  # NFSv4 only (recommended)
-  # - "2049:2049"
-  # Uncomment below for NFSv3 support (requires more ports)
-  # - "2049:2049/udp"
-  # - "111:111"
-  # - "111:111/udp"
-  # - "32765:32765"
-  # - "32765:32765/udp"
-  # - "32767:32767"
-  # - "32767:32767/udp"
-  # volumes:
-  # Share the same mount point as nzbwebdav (using bind mount)
-  # - ./fuse-mount:/shared:ro # Read-only NFS export
-  # NFS exports configuration
-  # - ./nfs-exports.txt:/etc/exports:ro
-  # environment:
-  # Optional: Enable debug logging
-  # - NFS_LOG_LEVEL=INFO
-  # depends_on:
-  # - nzbwebdav
-# volumes:
-# nzbwebdav-fuse:
-# Shared volume between nzbwebdav (FUSE mount) and nfs-server
-# driver: local
-# Using bind mounts instead of Docker volumes for FUSE sharing
+      - ./config:/config
+      # - /data/streaming:/data/streaming # Comment out until path is configured

@@ -20,7 +20,7 @@ wait_either() {
             return $?
         fi
 
-        if ! kill -0 "$pid3" 2>/dev/null; then
+        if [ -n "$pid3" ] && ! kill -0 "$pid3" 2>/dev/null; then
             wait "$pid3"
             EXITED_PID=$pid3
             REMAINING_PIDS=($pid1 $pid2)
@@ -39,6 +39,9 @@ terminate() {
     fi
     if [ -n "$FRONTEND_PID" ] && kill -0 "$FRONTEND_PID" 2>/dev/null; then
         kill "$FRONTEND_PID"
+    fi
+    if [ -n "$RCLONE_PID" ] && kill -0 "$RCLONE_PID" 2>/dev/null; then
+        kill "$RCLONE_PID"
     fi
     # Wait for children to exit
     wait
@@ -92,12 +95,6 @@ fi
 # Change permissions on /config directory to the given PUID and PGID
 chown $PUID:$PGID /config
 
-# Ensure FUSE mount point has correct permissions
-if [ -d "/mnt/nzbwebdav" ]; then
-    chown $PUID:$PGID /mnt/nzbwebdav
-    chmod 755 /mnt/nzbwebdav
-fi
-
 # Run backend database migration
 cd /app/backend
 echo "Running database maintenance."
@@ -108,43 +105,9 @@ if [ $? -ne 0 ]; then
 fi
 echo "Done with database maintenance."
 
-# FUSE DEBUG: Check if directory exists and try to create it
-echo "=== FUSE MOUNT DEBUG ==="
-echo "FUSE_ENABLED env var: ${FUSE_ENABLED:-not set}"
-echo "FUSE_MOUNT_POINT env var: ${FUSE_MOUNT_POINT:-not set}"
-echo "NFS_ENABLED env var: ${NFS_ENABLED:-not set}"
-
-if [ -d "/mnt/nzbwebdav" ]; then
-    echo "/mnt/nzbwebdav directory exists"
-    ls -la /mnt/nzbwebdav/ || echo "Cannot list /mnt/nzbwebdav contents"
-else
-    echo "/mnt/nzbwebdav directory does not exist - creating it"
-    mkdir -p /mnt/nzbwebdav
-    chmod 755 /mnt/nzbwebdav
-    chown "$PUID:$PGID" /mnt/nzbwebdav
-fi
-
-# Check if FUSE is mounted
-mount | grep nzbwebdav || echo "No FUSE mount found"
-
-# Add a delay to let .NET services start, then check again
-echo "Waiting 10 seconds for .NET FUSE service to start..."
-sleep 10 &
-SLEEP_PID=$!
-
-echo "=== END FUSE DEBUG ==="
-
 # Run backend as appuser in background
 gosu "$USER_NAME" ./NzbWebDAV &
-
-# Test - run as root in background
-#./NzbWebDAV &
 BACKEND_PID=$!
-
-# Start NFS server if enabled (after backend starts and FUSE is mounted)
-if [ "${NFS_ENABLED:-false}" = "true" ] && [ -n "${NFS_EXPORT_PATH:-}" ]; then
-    echo "NFS server will be started after backend is healthy..."
-fi
 
 # Wait for backend health check
 echo "Waiting for backend to start."
@@ -155,74 +118,6 @@ while true; do
     echo "Checking backend health: $BACKEND_URL/health ..."
     if curl -s -o /dev/null -w "%{http_code}" "$BACKEND_URL/health" | grep -q "^200$"; then
         echo "Backend is healthy."
-        
-        # Check if FUSE mounted after backend startup
-        echo "=== POST-STARTUP FUSE CHECK ==="
-        mount | grep nzbwebdav || echo "FUSE still not mounted after backend startup"
-        if [ -d "${NFS_EXPORT_PATH:-/mnt/nzbwebdav}" ]; then
-            ls -la "${NFS_EXPORT_PATH:-/mnt/nzbwebdav}/" 2>/dev/null || echo "Cannot access FUSE mount point"
-        fi
-        
-        # Check if backend process is running
-        if kill -0 "$BACKEND_PID" 2>/dev/null; then
-            echo "Backend process (PID $BACKEND_PID) is running"
-        else
-            echo "Backend process (PID $BACKEND_PID) is not running - this could be why FUSE isn't mounting"
-        fi
-        echo "=== END POST-STARTUP FUSE CHECK ==="
-        
-        # Start NFS server if enabled (now that backend is healthy and FUSE should be mounted)
-        if [ "${NFS_ENABLED:-false}" = "true" ] && [ -n "${NFS_EXPORT_PATH:-}" ]; then
-            echo "Starting professional NFS server for path: ${NFS_EXPORT_PATH}"
-            
-            # Wait for FUSE to be fully ready
-            sleep 3
-            
-            # Check if FUSE mount is accessible
-            echo "Checking FUSE mount accessibility..."
-            if mount | grep -q "nzbwebdav on ${NFS_EXPORT_PATH}"; then
-                echo "FUSE is mounted at ${NFS_EXPORT_PATH}"
-                
-                # Show mount options for debugging
-                echo "FUSE mount options:"
-                mount | grep nzbwebdav
-                
-                # Test access to FUSE mount
-                echo "Testing access to FUSE mount..."
-                if ls "${NFS_EXPORT_PATH}" > /dev/null 2>&1; then
-                    echo "FUSE mount is accessible"
-                    ls -la "${NFS_EXPORT_PATH}/" | head -3
-                else
-                    echo "Warning: FUSE mount access issue"
-                fi
-            else
-                echo "Warning: FUSE is not mounted at ${NFS_EXPORT_PATH}"
-            fi
-            
-            # Set environment variables for the NFS server script
-            export NFS_EXPORT_0="${NFS_EXPORT_PATH} *(ro,sync,no_subtree_check,no_root_squash,insecure,crossmnt,fsid=0)"
-            export NFS_PORT_MOUNTD=33333
-            export NFS_LOG_LEVEL=DEBUG
-            export NFS_VERSION=4.2
-            
-            # Remove existing empty /etc/exports so the script uses environment variables
-            echo "Removing existing /etc/exports to use environment variables..."
-            rm -f /etc/exports
-            
-            # Verify the export environment variable
-            echo "NFS_EXPORT_0 = ${NFS_EXPORT_0}"
-            
-            # Start the professional NFS server in background
-            echo "Starting professional NFS server with ehough/docker-nfs-server script..."
-            /entrypoint-nfs.sh &
-            NFS_PID=$!
-            
-            # Give NFS server time to start
-            sleep 5
-            
-            echo "NFS server started with PID ${NFS_PID}"
-        fi
-        
         break
     fi
 
@@ -242,36 +137,56 @@ cd /app/frontend
 gosu "$USER_NAME" npm run start &
 FRONTEND_PID=$!
 
-rclone serve nfs nzbdav: --addr 0.0.0.0:2049 \
-    --vfs-cache-mode=full \
-    --buffer-size=1024 \
-    --dir-cache-time=1s \
-    --vfs-cache-max-size=5G \
-    --vfs-cache-max-age=180m \
-    --links \
-    --use-cookies \
-    --uid=1000 \
-    --gid=1000 \
-    --nfs-cache-type disk &
-RCLONE_PID=$!
+# Start rclone NFS server if enabled
+if [ "${NFS_ENABLED:-false}" = "true" ]; then
+    echo "Starting rclone NFS server..."
+    
+    # Wait a bit for backend to be fully ready
+    sleep 3
+    
+    rclone serve nfs nzbdav: \
+        --addr :2049 \
+        --read-only \
+        --vfs-cache-mode full \
+        --vfs-cache-max-size 1G \
+        --dir-perms 777 \
+        --file-perms 666 \
+        --uid 0 \
+        --gid 0 \
+        --umask 000 &
+    RCLONE_PID=$!
+    
+    echo "Rclone NFS server started with PID ${RCLONE_PID}"
+else
+    # If NFS is disabled, just wait for backend and frontend
+    RCLONE_PID=""
+fi
 
-# Wait for either to exit
-wait_either $BACKEND_PID $FRONTEND_PID $RCLONE_PID
-EXIT_CODE=$?
+# Wait for processes to exit
+if [ -n "$RCLONE_PID" ]; then
+    # Wait for any of the three processes
+    wait_either $BACKEND_PID $FRONTEND_PID $RCLONE_PID
+    EXIT_CODE=$?
+else
+    # Only wait for backend and frontend
+    wait_either $BACKEND_PID $FRONTEND_PID
+    EXIT_CODE=$?
+fi
 
 # Determine which process exited
 if [ "$EXITED_PID" -eq "$FRONTEND_PID" ]; then
     echo "The web-frontend has exited. Shutting down the web-backend and rclone..."
 elif [ "$EXITED_PID" -eq "$RCLONE_PID" ]; then
-    echo "The rclone has exited. Shutting down the web-frontend and web-backend..."
+    echo "The rclone NFS server has exited. Shutting down the web-frontend and web-backend..."
 else
     echo "The web-backend has exited. Shutting down the web-frontend and rclone..."
 fi
 
-# Kill the remaining processes in a loop
-while [ ${#REMAINING_PIDS[@]} -gt 0 ]; do
-    kill ${REMAINING_PIDS[0]}
-    REMAINING_PIDS=(${REMAINING_PIDS[@]:1})
+# Kill remaining processes
+for pid in "${REMAINING_PIDS[@]}"; do
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        kill "$pid"
+    fi
 done
 
 # Exit with the code of the process that died first

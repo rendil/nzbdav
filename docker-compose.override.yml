@@ -1,42 +1,17 @@
-# Docker Compose override for adding FUSE and NFS support
+# Docker Compose override for rclone NFS support
 # This file extends your existing docker-compose.yml
-#
-# Usage:
-# 1. Ensure your main docker-compose.yml exists
-# 2. Run: docker-compose -f docker-compose.yml -f docker-compose.override.yml up
-#
-# Or rename this file to docker-compose.override.yml to have it automatically included
 
 services:
-  # Extend your existing nzbwebdav service
   nzbwebdav:
     ports:
       - "3000:3000"
       - "8080:8080"
-      # NFS ports (standard ports, host services disabled)
-      - "111:111" # RPC portmapper
-      - "2049:2049" # NFSv4
-      - "33333:33333" # NFS mountd (fixed port)
+      - "2049:2049" # rclone NFS server
     environment:
-      # Enable FUSE filesystem
-      - FUSE_ENABLED=false
-      - FUSE_MOUNT_POINT=/mnt/nzbwebdav
-      - NFS_ENABLED=false
-      - NFS_EXPORT_PATH=/mnt/nzbwebdav
+      # Enable rclone NFS
+      - NFS_ENABLED=true
       - PUID=1000
       - PGID=1000
     volumes:
-      - /root/nzbdav:/config
-      - /data/streaming:/data/streaming # Comment out until path is configured
-    privileged: true # Required for FUSE operations
-    devices:
-      - /dev/fuse:/dev/fuse
-    cap_add:
-      - SYS_ADMIN
-
-  # NFS server is now integrated into the main nzbwebdav container
-  # This allows FUSE mounts to be properly shared via NFS
-# volumes:
-# nzbwebdav-fuse:
-# driver: local
-# Using bind mounts instead of Docker volumes for FUSE sharing
+      - ./config:/config
+      # - /data/streaming:/data/streaming # Comment out until path is configured

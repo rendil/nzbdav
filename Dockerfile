@@ -32,7 +32,6 @@ ENV LD_LIBRARY_PATH="/usr/lib:/lib:/usr/local/lib:/usr/lib/x86_64-linux-gnu"
 
 # Prepare environment with Ubuntu packages
 RUN mkdir /config && \
-    mkdir -p /mnt/nzbwebdav && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
         nodejs \
@@ -41,18 +40,8 @@ RUN mkdir /config && \
         curl \
         ffmpeg \
         gosu \
-        fuse3 \
-        libfuse3-3 \
-        libfuse3-dev \
-        nfs-kernel-server \
-        rpcbind \
-        libcap2-bin \
+        ca-certificates \
         unzip && \
-        # http://wiki.linux-nfs.org/wiki/index.php/Nfsv4_configuration
-    mkdir -p /var/lib/nfs/rpc_pipefs                                                     && \
-    mkdir -p /var/lib/nfs/v4recovery                                                     && \
-    echo "rpc_pipefs  /var/lib/nfs/rpc_pipefs  rpc_pipefs  defaults  0  0" >> /etc/fstab && \
-    echo "nfsd        /proc/fs/nfsd            nfsd        defaults  0  0" >> /etc/fstab && \
 
     echo "=== RCLONE Installation Debug ===" && \
     curl -O https://downloads.rclone.org/rclone-current-linux-amd64.zip && \
@@ -117,8 +106,7 @@ COPY --from=backend-build /backend/publish ./backend
 
 # Entry and runtime setup
 COPY entrypoint.sh /entrypoint.sh
-COPY entrypoint-nfs.sh /entrypoint-nfs.sh
-RUN chmod +x /entrypoint.sh /entrypoint-nfs.sh
+RUN chmod +x /entrypoint.sh
 
 EXPOSE 3000
 ARG NZBDAV_VERSION
