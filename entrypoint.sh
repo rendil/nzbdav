@@ -121,9 +121,6 @@ FRONTEND_PID=$!
 if [ "${NFS_ENABLED:-false}" = "true" ] && command -v rclone >/dev/null 2>&1; then
     echo "Starting rclone NFS server..."
     
-    # Wait a bit for backend to be fully ready
-    sleep 3
-    
     rclone serve nfs nzbdav: \
         --addr 0.0.0.0:2049 \
         --vfs-cache-mode=full \
@@ -149,24 +146,9 @@ else
     RCLONE_PID=""
 fi
 
-# Wait for processes to exit
-if [ -n "$RCLONE_PID" ] && [ -n "$FRONTEND_PID" ]; then
-    # Wait for any of the three processes
+ # Wait for any of the three processes
     wait_either $BACKEND_PID $FRONTEND_PID $RCLONE_PID
     EXIT_CODE=$?
-elif [ -n "$RCLONE_PID" ]; then
-    # Wait for backend and rclone only
-    wait_either $BACKEND_PID "" $RCLONE_PID
-    EXIT_CODE=$?
-elif [ -n "$FRONTEND_PID" ]; then
-    # Wait for backend and frontend only
-    wait_either $BACKEND_PID $FRONTEND_PID
-    EXIT_CODE=$?
-else
-    # Backend only
-    wait $BACKEND_PID
-    EXIT_CODE=$?
-fi
 
 # Determine which process exited
 if [ "$EXITED_PID" -eq "$FRONTEND_PID" ]; then
