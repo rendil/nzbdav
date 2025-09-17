@@ -10,6 +10,7 @@ services:
       - NFS_ENABLED=true
       - PUID=1000
       - PGID=1000
+      - LOG_LEVEL=debug
     volumes:
       - /root/nzbdav:/config
       - /data/streaming:/data/streaming
