@@ -20,7 +20,7 @@ COPY ./backend ./
 # Accept build-time architecture as ARG (e.g., x64 or arm64)
 ARG TARGETARCH
 RUN dotnet restore
-RUN dotnet publish -c Release -r linux-${TARGETARCH} -o ./publish
+RUN dotnet publish -c Release -r linux-musl-${TARGETARCH} -o ./publish
 
 # -------- Stage 3: Combined runtime image --------
 FROM mcr.microsoft.com/dotnet/aspnet:9.0-alpine
@@ -28,16 +28,8 @@ FROM mcr.microsoft.com/dotnet/aspnet:9.0-alpine
 WORKDIR /app
 
 # Prepare environment with Alpine packages
-RUN mkdir /config && \
-    apk add --no-cache \
-        nodejs \
-        npm \
-        bash \
-        curl \
-        ffmpeg \
-        su-exec \
-        ca-certificates \
-        unzip && \
+RUN mkdir /config \
+    && apk add --no-cache nodejs npm libc6-compat shadow su-exec bash curl ffmpeg ca-certificates unzip \
     echo "=== RCLONE Installation Debug ===" && \
     curl -O https://downloads.rclone.org/rclone-current-linux-amd64.zip && \
     unzip rclone-current-linux-amd64.zip && \
