@@ -134,6 +134,7 @@ if [ "${NFS_ENABLED:-false}" = "true" ] && command -v rclone >/dev/null 2>&1; th
     
     rclone serve nfs nzbdav: \
         --addr 0.0.0.0:2049 \
+        --nfs-cache-type disk \
         --vfs-cache-mode=full \
         --buffer-size=1024 \
         --dir-cache-time=1s \
