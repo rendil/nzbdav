@@ -28,8 +28,8 @@ FROM mcr.microsoft.com/dotnet/aspnet:9.0-alpine
 WORKDIR /app
 
 # Prepare environment with Alpine packages
-RUN mkdir /config \
-    && apk add --no-cache nodejs npm libc6-compat shadow su-exec bash curl ffmpeg ca-certificates unzip \
+RUN mkdir /config && \
+    apk add --no-cache nodejs npm libc6-compat shadow su-exec bash curl ffmpeg ca-certificates unzip && \
     echo "=== RCLONE Installation Debug ===" && \
     curl -O https://downloads.rclone.org/rclone-current-linux-amd64.zip && \
     unzip rclone-current-linux-amd64.zip && \
