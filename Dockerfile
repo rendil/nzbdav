@@ -39,7 +39,6 @@ RUN mkdir /config && \
         gosu \
         ca-certificates \
         unzip && \
-
     echo "=== RCLONE Installation Debug ===" && \
     curl -O https://downloads.rclone.org/rclone-current-linux-amd64.zip && \
     unzip rclone-current-linux-amd64.zip && \

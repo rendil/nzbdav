@@ -11,5 +11,5 @@ services:
       - PUID=1000
       - PGID=1000
     volumes:
-      - ./config:/config
-      # - /data/streaming:/data/streaming # Comment out until path is configured
+      - /root/nzbdav:/config
+      - /data/streaming:/data/streaming
