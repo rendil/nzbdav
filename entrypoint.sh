@@ -145,15 +145,17 @@ if [ "${NFS_ENABLED:-false}" = "true" ]; then
     sleep 3
     
     rclone serve nfs nzbdav: \
-        --addr :2049 \
-        --read-only \
-        --vfs-cache-mode full \
-        --vfs-cache-max-size 1G \
-        --dir-perms 777 \
-        --file-perms 666 \
-        --uid 0 \
-        --gid 0 \
-        --umask 000 &
+        --addr 0.0.0.0:2049 \
+        --vfs-cache-mode=full \
+        --buffer-size=1024 \
+        --dir-cache-time=1s \
+        --vfs-cache-max-size=5G \
+        --vfs-cache-max-age=180m \
+        --links \
+        --use-cookies \
+        --allow-other \
+        --uid=1000 \
+        --gid=1000 &
     RCLONE_PID=$!
     
     echo "Rclone NFS server started with PID ${RCLONE_PID}"

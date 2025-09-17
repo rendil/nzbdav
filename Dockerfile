@@ -70,7 +70,7 @@ COPY --from=backend-build /backend/publish ./backend
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-EXPOSE 3000
+EXPOSE 3000 8080 2049
 ARG NZBDAV_VERSION
 ENV NZBDAV_VERSION=${NZBDAV_VERSION}
 ENV NODE_ENV=production
