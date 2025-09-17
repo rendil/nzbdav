@@ -6,7 +6,7 @@ services:
       - "8080:8080"
     environment:
       # Enable rclone NFS
-      - NFS_ENABLED=true
+      - NFS_ENABLED=false
       - PUID=1000
       - PGID=1000
       - LOG_LEVEL=info
