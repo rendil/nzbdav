@@ -16,10 +16,3 @@ nuget
 
 .idea/
 .vscode/
-
-#################
-# nzbdav config #
-#################
-
-config/
-fuse-mount/
