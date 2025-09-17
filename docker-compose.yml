@@ -15,15 +15,19 @@ services:
       - /data/streaming:/data/streaming
 
   nfs_server:
-    image: erichough/nfs-server:latest
+    image: gists/nfs-server
     ports:
       - "2049:2049"
-    environment:
-      - NFS_EXPORT_0=/nzbdav 192.168.10.0/24(rw,fsid=1,no_subtree_check)
-    volumes:
-      - streaming_media:/nzbdav
+    # https://docs.docker.com/engine/reference/run/#runtime-privilege-and-linux-capabilities
     cap_add:
       - SYS_ADMIN
+      - SETPCAP
+    environment:
+      - NFS_DOMAIN=192.168.10.0/24
+      - NFS_OPTION=rw,fsid=0,no_subtree_check
+    volumes:
+      - streaming_media:/nfs-share
+    restart: always
     depends_on:
       - nzbwebdav
 
