@@ -42,11 +42,6 @@ RUN mkdir /config && \
     echo "Rclone installed:" && \
     which rclone && \
     rclone version && \
-    rclone config create nzbdav webdav \
-      url=http://localhost:8080 \
-      vendor=other \
-      user=nzbdav \
-      pass=$(rclone obscure "nzbdav") && \
     echo "=== End RCLONE Debug ==="
 
 # Copy frontend
@@ -67,5 +62,9 @@ ARG NZBDAV_VERSION
 ENV NZBDAV_VERSION=${NZBDAV_VERSION}
 ENV NODE_ENV=production
 ENV LOG_LEVEL=warning
+
+# Default rclone WebDAV credentials
+ENV WEBDAV_USERNAME=nzbdav
+ENV WEBDAV_PASSWORD=nzbdav
 
 CMD ["/entrypoint.sh"]

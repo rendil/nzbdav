@@ -121,6 +121,17 @@ FRONTEND_PID=$!
 if [ "${NFS_ENABLED:-false}" = "true" ] && command -v rclone >/dev/null 2>&1; then
     echo "Starting rclone NFS server..."
     
+    # Create rclone config with environment variables
+    WEBDAV_USERNAME=${WEBDAV_USERNAME:-nzbdav}
+    WEBDAV_PASSWORD=${WEBDAV_PASSWORD:-nzbdav}
+    
+    echo "Creating rclone WebDAV config with username: $WEBDAV_USERNAME"
+    rclone config create nzbdav webdav \
+        url=http://localhost:8080 \
+        vendor=other \
+        user="$WEBDAV_USERNAME" \
+        pass=$(rclone obscure "$WEBDAV_PASSWORD")
+    
     rclone serve nfs nzbdav: \
         --addr 0.0.0.0:2049 \
         --vfs-cache-mode=full \
