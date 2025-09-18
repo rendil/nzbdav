@@ -1,6 +1,5 @@
 import type { Route } from "./+types/route";
 import styles from "./route.module.css";
-import { backendClient } from "~/clients/backend-client.server";
 import { useState, useEffect } from "react";
 import { Card, Table, Badge, Alert, Button, Collapse } from "react-bootstrap";
 
@@ -28,8 +27,26 @@ type IntegrityResultsData = {
 
 export async function loader({ request }: Route.LoaderArgs) {
     try {
-        const response = await backendClient.get<IntegrityResultsData>("/api/integrity-results", request);
-        return { data: response, error: null };
+        const url = new URL(request.url);
+        const backendUrl = process.env.BACKEND_URL || `${url.protocol}//${url.host}`;
+        const apiKey = process.env.FRONTEND_BACKEND_API_KEY || "";
+        
+        const response = await fetch(`${backendUrl}/api/integrity-results`, {
+            method: "GET",
+            headers: {
+                "Content-Type": "application/json",
+                "x-api-key": apiKey
+            }
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error("API Error:", response.status, errorText);
+            return { data: null, error: `Failed to load integrity results: ${response.status} ${response.statusText}` };
+        }
+
+        const data: IntegrityResultsData = await response.json();
+        return { data, error: null };
     } catch (error) {
         console.error("Failed to load integrity results:", error);
         return { data: null, error: "Failed to load integrity results" };
