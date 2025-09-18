@@ -60,7 +60,7 @@ public class IntegrityResultsController(DavDatabaseClient dbClient) : BaseApiCon
             if (!isLibraryFile && Guid.TryParse(fileId, out var davItemId))
             {
                 // Internal DAV item
-                var davItem = await dbClient.Ctx.DavItems
+                var davItem = await dbClient.Ctx.Items
                     .FirstOrDefaultAsync(d => d.Id == davItemId, HttpContext.RequestAborted);
                 if (davItem != null)
                 {
