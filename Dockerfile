@@ -27,22 +27,9 @@ FROM mcr.microsoft.com/dotnet/aspnet:9.0-alpine
 
 WORKDIR /app
 
-# Prepare environment with Alpine packages
-RUN mkdir /config && \
-    apk add --no-cache nodejs npm libc6-compat shadow su-exec bash curl ffmpeg ca-certificates unzip && \
-    echo "=== RCLONE Installation Debug ===" && \
-    curl -O https://downloads.rclone.org/rclone-current-linux-amd64.zip && \
-    unzip rclone-current-linux-amd64.zip && \
-    cd rclone-*-linux-amd64 && \
-    cp rclone /usr/bin/ && \
-    chown root:root /usr/bin/rclone && \
-    chmod 755 /usr/bin/rclone && \
-    cd .. && \
-    rm -rf rclone-* && \
-    echo "Rclone installed:" && \
-    which rclone && \
-    rclone version && \
-    echo "=== End RCLONE Debug ==="
+# Prepare environment
+RUN mkdir /config \
+    && apk add --no-cache nodejs npm libc6-compat shadow su-exec bash curl ffmpeg
 
 # Copy frontend
 COPY --from=frontend-build /frontend/node_modules ./frontend/node_modules
@@ -57,14 +44,10 @@ COPY --from=backend-build /backend/publish ./backend
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-EXPOSE 3000 8080 2049
+EXPOSE 3000
 ARG NZBDAV_VERSION
 ENV NZBDAV_VERSION=${NZBDAV_VERSION}
 ENV NODE_ENV=production
 ENV LOG_LEVEL=warning
-
-# Default rclone WebDAV credentials
-ENV WEBDAV_USERNAME=nzbdav
-ENV WEBDAV_PASSWORD=nzbdav
 
 CMD ["/entrypoint.sh"]

@@ -1,29 +1,21 @@
-#!/bin/bash
+#!/bin/sh
 
 wait_either() {
     local pid1=$1
     local pid2=$2
-    local pid3=$3
 
     while true; do
-        if [ -n "$pid1" ] && ! kill -0 "$pid1" 2>/dev/null; then
+        if ! kill -0 "$pid1" 2>/dev/null; then
             wait "$pid1"
             EXITED_PID=$pid1
-            REMAINING_PIDS=($pid2 $pid3)
+            REMAINING_PID=$pid2
             return $?
         fi
 
-        if [ -n "$pid2" ] && ! kill -0 "$pid2" 2>/dev/null; then
+        if ! kill -0 "$pid2" 2>/dev/null; then
             wait "$pid2"
             EXITED_PID=$pid2
-            REMAINING_PIDS=($pid1 $pid3)
-            return $?
-        fi
-
-        if [ -n "$pid3" ] && ! kill -0 "$pid3" 2>/dev/null; then
-            wait "$pid3"
-            EXITED_PID=$pid3
-            REMAINING_PIDS=($pid1 $pid2)
+            REMAINING_PID=$pid1
             return $?
         fi
 
@@ -39,9 +31,6 @@ terminate() {
     fi
     if [ -n "$FRONTEND_PID" ] && kill -0 "$FRONTEND_PID" 2>/dev/null; then
         kill "$FRONTEND_PID"
-    fi
-    if [ -n "$RCLONE_PID" ] && kill -0 "$RCLONE_PID" 2>/dev/null; then
-        kill "$RCLONE_PID"
     fi
     # Wait for children to exit
     wait
@@ -117,65 +106,19 @@ cd /app/frontend
 su-exec appuser npm run start &
 FRONTEND_PID=$!
 
-# Start rclone NFS server if enabled and available
-if [ "${NFS_ENABLED:-false}" = "true" ] && command -v rclone >/dev/null 2>&1; then
-    echo "Starting rclone NFS server..."
-    
-    # Create rclone config with environment variables
-    WEBDAV_USERNAME=${WEBDAV_USERNAME:-nzbdav}
-    WEBDAV_PASSWORD=${WEBDAV_PASSWORD:-nzbdav}
-    
-    echo "Creating rclone WebDAV config with username: $WEBDAV_USERNAME"
-    rclone config create nzbdav webdav \
-        url=http://localhost:8080 \
-        vendor=other \
-        user="$WEBDAV_USERNAME" \
-        pass=$(rclone obscure "$WEBDAV_PASSWORD")
-    
-    rclone serve nfs nzbdav: \
-        --addr 0.0.0.0:2049 \
-        --nfs-cache-type disk \
-        --vfs-cache-mode=full \
-        --buffer-size=1024 \
-        --dir-cache-time=1s \
-        --vfs-cache-max-size=5G \
-        --vfs-cache-max-age=180m \
-        --links \
-        --use-cookies \
-        --uid=1000 \
-        --gid=1000 &
-    RCLONE_PID=$!
-    
-    echo "Rclone NFS server started with PID ${RCLONE_PID}"
-else
-    # NFS is disabled or rclone not available
-    if [ "${NFS_ENABLED:-false}" = "true" ]; then
-        echo "NFS enabled but rclone not found - NFS server will not start"
-    else
-        echo "NFS disabled - backend only mode"
-    fi
-    RCLONE_PID=""
-fi
-
- # Wait for any of the three processes
-    wait_either $BACKEND_PID $FRONTEND_PID $RCLONE_PID
-    EXIT_CODE=$?
+# Wait for either to exit
+wait_either $BACKEND_PID $FRONTEND_PID
+EXIT_CODE=$?
 
 # Determine which process exited
 if [ "$EXITED_PID" -eq "$FRONTEND_PID" ]; then
-    echo "The web-frontend has exited. Shutting down the web-backend and rclone..."
-elif [ "$EXITED_PID" -eq "$RCLONE_PID" ]; then
-    echo "The rclone NFS server has exited. Shutting down the web-frontend and web-backend..."
+    echo "The web-frontend has exited. Shutting down the web-backend..."
 else
-    echo "The web-backend has exited. Shutting down the web-frontend and rclone..."
+    echo "The web-backend has exited. Shutting down the web-frontend..."
 fi
 
-# Kill remaining processes
-for pid in "${REMAINING_PIDS[@]}"; do
-    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-        kill "$pid"
-    fi
-done
+# Kill the remaining process
+kill $REMAINING_PID
 
 # Exit with the code of the process that died first
 exit $EXIT_CODE
