@@ -19,6 +19,10 @@ export function LeftNavigation({ version }: LeftNavigationProps) {
                 <div className={styles["explore-icon"]} />
                 <div className={styles.title}>Dav Explore</div>
             </Item>
+            <Item target="/integrity-results">
+                <div className={styles["integrity-icon"]} />
+                <div className={styles.title}>Integrity Results</div>
+            </Item>
             <Item target="/settings">
                 <div className={styles["settings-icon"]} />
                 <div className={styles.title}>Settings</div>
