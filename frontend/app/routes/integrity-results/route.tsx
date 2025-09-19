@@ -1,7 +1,104 @@
 import type { Route } from "./+types/route";
 import styles from "./route.module.css";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Card, Table, Badge, Alert, Button, Collapse } from "react-bootstrap";
+import { receiveMessage } from "../../utils/websocket-util";
+
+const integrityProgressTopic = { topic: "IntegrityCheckProgress" };
+
+// Integrity Check Button Component
+function IntegrityCheckButton() {
+    const [isFetching, setIsFetching] = useState(false);
+    const [progress, setProgress] = useState<string | null>(null);
+    const [connected, setConnected] = useState(false);
+
+    const isFinished = progress?.startsWith("complete") || progress?.startsWith("failed") || progress?.startsWith("cancelled");
+    const isRunning = !isFinished && (isFetching || progress !== null);
+    const isRunButtonEnabled = connected && !isRunning;
+    const runButtonVariant = isRunButtonEnabled ? 'primary' : 'secondary';
+    const runButtonLabel = isRunning ? "⌛ Checking..." : '🔍 Check Media Integrity Now';
+
+    // Parse progress for display
+    let progressDetails = null;
+    if (isRunning && progress && progress.includes('/')) {
+        const parts = progress.split(' ');
+        const fraction = parts[0];
+        const corruptInfo = parts.length > 1 ? parts.slice(1).join(' ') : '';
+        progressDetails = { fraction, corruptInfo };
+    }
+
+    // WebSocket connection effect
+    useEffect(() => {
+        let ws: WebSocket;
+        let disposed = false;
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
+            ws = new WebSocket(wsUrl);
+            ws.onmessage = receiveMessage((_, message) => setProgress(message));
+            ws.onopen = () => { 
+                setConnected(true); 
+                ws.send(JSON.stringify(integrityProgressTopic)); 
+            }
+            ws.onclose = () => { 
+                setConnected(false);
+                if (!disposed) setTimeout(() => connect(), 1000); 
+                setProgress(null) 
+            };
+            ws.onerror = () => { ws.close() };
+        }
+        connect();
+        return () => { disposed = true; ws.close(); }
+    }, [setProgress, setConnected]);
+
+    // Trigger integrity check
+    const onRunCheck = useCallback(async () => {
+        setIsFetching(true);
+        try {
+            const response = await fetch("/api/media-integrity", {
+                method: "POST",
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            if (!response.ok) {
+                console.error('Failed to trigger integrity check:', response.statusText);
+            }
+        } catch (error) {
+            console.error('Error triggering integrity check:', error);
+        }
+        setIsFetching(false);
+    }, [setIsFetching]);
+
+    return (
+        <div className="d-flex align-items-center gap-3">
+            <Button variant={runButtonVariant} onClick={onRunCheck} disabled={!isRunButtonEnabled}>
+                {runButtonLabel}
+            </Button>
+            {isRunning && progressDetails && (
+                <div className="text-muted small">
+                    Progress: {progressDetails.fraction} 
+                    {progressDetails.corruptInfo && <span> - {progressDetails.corruptInfo}</span>}
+                </div>
+            )}
+            {isRunning && progress && !progressDetails && (
+                <div className="text-muted small">
+                    Status: {progress}
+                </div>
+            )}
+            {isFinished && (
+                <div className="text-muted small">
+                    {progress}
+                </div>
+            )}
+            {!connected && (
+                <div className="text-muted small">
+                    <em>Connecting to status updates...</em>
+                </div>
+            )}
+        </div>
+    );
+}
 
 // Helper function to format UTC dates for local display
 function formatDateForDisplay(dateString: string): string {
@@ -73,6 +170,58 @@ export async function loader({ request }: Route.LoaderArgs) {
 
 export default function IntegrityResults(props: Route.ComponentProps) {
     const { data, error } = props.loaderData;
+    const [liveData, setLiveData] = useState(data);
+    const [isCheckRunning, setIsCheckRunning] = useState(false);
+    const [lastProgressUpdate, setLastProgressUpdate] = useState<string | null>(null);
+
+    // WebSocket for real-time updates
+    useEffect(() => {
+        let ws: WebSocket;
+        let disposed = false;
+        
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
+            ws = new WebSocket(wsUrl);
+            
+            ws.onmessage = receiveMessage((_, message) => {
+                setLastProgressUpdate(message);
+                
+                // Determine if check is running based on progress message
+                const isRunning = message && 
+                    !message.startsWith("complete") && 
+                    !message.startsWith("failed") && 
+                    !message.startsWith("cancelled");
+                setIsCheckRunning(isRunning);
+                
+                // Refresh data when check completes
+                if (message && (message.startsWith("complete") || message.startsWith("failed"))) {
+                    setTimeout(() => {
+                        // Reload the page data to get fresh results
+                        window.location.reload();
+                    }, 2000);
+                }
+            });
+            
+            ws.onopen = () => { 
+                ws.send(JSON.stringify(integrityProgressTopic)); 
+            };
+            
+            ws.onclose = () => { 
+                if (!disposed) setTimeout(() => connect(), 1000); 
+            };
+            
+            ws.onerror = () => { ws.close() };
+        }
+        
+        connect();
+        return () => { disposed = true; ws.close(); }
+    }, []);
+
+    // Update live data when props data changes
+    useEffect(() => {
+        setLiveData(data);
+    }, [data]);
 
     if (error) {
         return (
@@ -85,7 +234,7 @@ export default function IntegrityResults(props: Route.ComponentProps) {
         );
     }
 
-    if (!data) {
+    if (!liveData) {
         return (
             <div className="container mt-4">
                 <Alert variant="info">
@@ -98,9 +247,38 @@ export default function IntegrityResults(props: Route.ComponentProps) {
 
     return (
         <div className="container mt-4">
-            <h1>Media Integrity Results</h1>
+            <div className="d-flex justify-content-between align-items-center mb-4">
+                <h1>Media Integrity Results</h1>
+                <IntegrityCheckButton />
+            </div>
             
-            {data.jobRuns.length === 0 ? (
+            {/* Progress Banner */}
+            {isCheckRunning && (
+                <Alert variant="primary" className="mb-4">
+                    <div className="d-flex align-items-center">
+                        <div className="spinner-border spinner-border-sm me-3" role="status">
+                            <span className="visually-hidden">Loading...</span>
+                        </div>
+                        <div>
+                            <Alert.Heading className="h6 mb-1">🔍 Integrity Check in Progress</Alert.Heading>
+                            <div className="small">
+                                {lastProgressUpdate && lastProgressUpdate.includes('/') ? (
+                                    <>Progress: {lastProgressUpdate}</>
+                                ) : lastProgressUpdate ? (
+                                    <>Status: {lastProgressUpdate}</>
+                                ) : (
+                                    <>Checking media files for corruption...</>
+                                )}
+                            </div>
+                            <div className="small text-muted mt-1">
+                                New results will appear below as files are verified. Page will refresh when complete.
+                            </div>
+                        </div>
+                    </div>
+                </Alert>
+            )}
+            
+            {liveData.jobRuns.length === 0 ? (
                 <Alert variant="info">
                     <Alert.Heading>No Integrity Checks Found</Alert.Heading>
                     <p>No integrity checks have been completed yet. Check your settings to enable integrity checking.</p>
@@ -108,14 +286,14 @@ export default function IntegrityResults(props: Route.ComponentProps) {
             ) : (
                 <div className="mb-4">
                     <h3>Integrity Check Results by Execution</h3>
-                    <JobRunsList jobRuns={data.jobRuns} />
+                    <JobRunsList jobRuns={liveData.jobRuns} isCheckRunning={isCheckRunning} />
                 </div>
             )}
         </div>
     );
 }
 
-function JobRunsList({ jobRuns }: { jobRuns: IntegrityJobRun[] }) {
+function JobRunsList({ jobRuns, isCheckRunning }: { jobRuns: IntegrityJobRun[]; isCheckRunning?: boolean }) {
     const [expandedRuns, setExpandedRuns] = useState<Set<string>>(new Set());
 
     const toggleRun = (date: string) => {
@@ -128,23 +306,42 @@ function JobRunsList({ jobRuns }: { jobRuns: IntegrityJobRun[] }) {
         setExpandedRuns(newExpanded);
     };
 
+    // Determine if this is the most recent run (potentially active)
+    const mostRecentRun = jobRuns.length > 0 ? jobRuns[0] : null;
+
     return (
         <div>
-            {jobRuns.map((run) => (
-                <Card key={run.date} className="mb-3">
-                    <Card.Header>
-                        <div className="d-flex justify-content-between align-items-center">
-                            <div>
-                                <strong>{formatDateForDisplay(run.date)}</strong>
-                                {run.runId && (
-                                    <span className="ms-2 text-muted small">
-                                        (Run: {run.runId.substring(0, 8)})
+            {jobRuns.map((run, index) => {
+                const isActiveRun = isCheckRunning && index === 0; // Most recent run is active during check
+                
+                return (
+                    <Card key={run.date} className={`mb-3 ${isActiveRun ? 'border-primary' : ''}`}>
+                        <Card.Header className={isActiveRun ? 'bg-primary bg-opacity-10' : ''}>
+                            <div className="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <div className="d-flex align-items-center">
+                                        {isActiveRun && (
+                                            <div className="spinner-border spinner-border-sm me-2" role="status">
+                                                <span className="visually-hidden">Loading...</span>
+                                            </div>
+                                        )}
+                                        <strong>{formatDateForDisplay(run.date)}</strong>
+                                        {isActiveRun && (
+                                            <span className="ms-2 badge bg-primary">
+                                                🔍 Active
+                                            </span>
+                                        )}
+                                    </div>
+                                    {run.runId && (
+                                        <span className="ms-2 text-muted small">
+                                            (Run: {run.runId.substring(0, 8)})
+                                        </span>
+                                    )}
+                                    <span className="ms-3">
+                                        {run.totalFiles} files checked
+                                        {isActiveRun && <span className="text-muted"> (updating...)</span>}
                                     </span>
-                                )}
-                                <span className="ms-3">
-                                    {run.totalFiles} files checked
-                                </span>
-                            </div>
+                                </div>
                             <div>
                                 <Badge bg="success" className="me-2">
                                     {run.validFiles} valid
@@ -170,7 +367,8 @@ function JobRunsList({ jobRuns }: { jobRuns: IntegrityJobRun[] }) {
                         </Card.Body>
                     </Collapse>
                 </Card>
-            ))}
+                );
+            })}
         </div>
     );
 }

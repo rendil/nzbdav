@@ -1,9 +1,6 @@
-import { Alert, Button, Form } from "react-bootstrap";
+import { Alert, Form } from "react-bootstrap";
 import styles from "./integrity.module.css"
-import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
-import { receiveMessage } from "~/utils/websocket-util";
-
-const integrityProgressTopic = { 'icp': 'state' };
+import { type Dispatch, type SetStateAction } from "react";
 
 type IntegritySettingsProps = {
     config: Record<string, string>
@@ -11,18 +8,8 @@ type IntegritySettingsProps = {
 };
 
 export function IntegritySettings({ config, setNewConfig }: IntegritySettingsProps) {
-    // stateful variables
-    const [connected, setConnected] = useState<boolean>(false);
-    const [progress, setProgress] = useState<string | null>(null);
-    const [isFetching, setIsFetching] = useState<boolean>(false);
-
     // derived variables
     const isEnabled = config["integrity.enabled"] === "true";
-    const isFinished = progress?.startsWith("complete") || progress?.startsWith("failed") || progress?.startsWith("cancelled");
-    const isRunning = !isFinished && (isFetching || progress !== null);
-    const isRunButtonEnabled = connected && !isRunning;
-    const runButtonVariant = isRunButtonEnabled ? 'primary' : 'secondary';
-    const runButtonLabel = isRunning ? "⌛ Checking..." : '🔍 Check Media Integrity Now';
     
     // Check if any arr instances are configured
     const hasArrInstances = () => {
@@ -38,58 +25,6 @@ export function IntegritySettings({ config, setNewConfig }: IntegritySettingsPro
         }
         return false;
     };
-
-    // Parse progress for display
-    let progressDetails = null;
-    if (isRunning && progress && progress.includes('/')) {
-        const parts = progress.split(' ');
-        const fraction = parts[0];
-        const corruptInfo = parts.length > 1 ? parts.slice(1).join(' ') : '';
-        progressDetails = { fraction, corruptInfo };
-    }
-
-    // effects
-    useEffect(() => {
-        let ws: WebSocket;
-        let disposed = false;
-        function connect() {
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws`;
-            ws = new WebSocket(wsUrl);
-            ws.onmessage = receiveMessage((_, message) => setProgress(message));
-            ws.onopen = () => { 
-                setConnected(true); 
-                ws.send(JSON.stringify(integrityProgressTopic)); 
-            }
-            ws.onclose = () => { 
-                setConnected(false);
-                if (!disposed) setTimeout(() => connect(), 1000); 
-                setProgress(null) 
-            };
-            ws.onerror = () => { ws.close() };
-        }
-        connect();
-        return () => { disposed = true; ws.close(); }
-    }, [setProgress, setConnected]);
-
-    // events
-    const onRunCheck = useCallback(async () => {
-        setIsFetching(true);
-        try {
-            const response = await fetch("/api/media-integrity", {
-                method: "POST",
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            });
-            if (!response.ok) {
-                console.error('Failed to trigger integrity check:', response.statusText);
-            }
-        } catch (error) {
-            console.error('Error triggering integrity check:', error);
-        }
-        setIsFetching(false);
-    }, [setIsFetching]);
 
     // view
     return (
@@ -251,47 +186,6 @@ export function IntegritySettings({ config, setNewConfig }: IntegritySettingsPro
                 </Form.Text>
             </Form.Group>
 
-            <hr />
-
-            <div className={styles.task}>
-                <Form.Group>
-                    <Form.Label className={styles.title}>Manual Integrity Check</Form.Label>
-                    <div className={styles.run}>
-                        <Button variant={runButtonVariant} onClick={onRunCheck} disabled={!isRunButtonEnabled}>
-                            {runButtonLabel}
-                        </Button>
-                        {isRunning && progressDetails && (
-                            <div className={styles["task-progress"]}>
-                                Progress: {progressDetails.fraction} <br />
-                                {progressDetails.corruptInfo && <span>Status: {progressDetails.corruptInfo}</span>}
-                            </div>
-                        )}
-                        {isRunning && progress && !progressDetails && (
-                            <div className={styles["task-progress"]}>
-                                Status: {progress}
-                            </div>
-                        )}
-                        {isFinished && (
-                            <div className={styles["task-progress"]}>
-                                {progress}
-                            </div>
-                        )}
-                        {!connected && (
-                            <div className={styles["task-progress"]}>
-                                <em>Connecting to status updates...</em>
-                            </div>
-                        )}
-                    </div>
-                    <Form.Text id="manual-check-help" muted>
-                        <br />
-                        Manually trigger an integrity check to verify media files immediately. 
-                        This will check files that haven't been verified recently according to your settings.
-                        <br /><br />
-                        The check uses ffprobe to analyze video and audio files for corruption. 
-                        Supported formats include MP4, MKV, AVI, MP3, FLAC, and many others.
-                    </Form.Text>
-                </Form.Group>
-            </div>
         </div>
     );
 }
