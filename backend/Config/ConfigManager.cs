@@ -186,9 +186,9 @@ public class ConfigManager
         return false; // Default to disabled for performance
     }
 
-    public bool IsAutoUnmonitorEnabled()
+    public bool IsAutoMonitorEnabled()
     {
-        if (bool.TryParse(GetConfigValue("integrity.auto_unmonitor"), out var enabled))
+        if (bool.TryParse(GetConfigValue("integrity.auto_monitor"), out var enabled))
             return enabled;
         return false; // Default to disabled for safety
     }

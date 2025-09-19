@@ -157,14 +157,14 @@ export function IntegritySettings({ config, setNewConfig }: IntegritySettingsPro
                     <Form.Group>
                         <Form.Check
                             type="checkbox"
-                            id="auto-unmonitor-checkbox"
-                            label="Auto-unmonitor after successful integrity checks"
-                            checked={config["integrity.auto_unmonitor"] === "true"}
-                            onChange={e => setNewConfig({ ...config, "integrity.auto_unmonitor": e.target.checked ? "true" : "false" })}
+                            id="auto-monitor-checkbox"
+                            label="Auto-monitor corrupt files before deletion"
+                            checked={config["integrity.auto_monitor"] === "true"}
+                            onChange={e => setNewConfig({ ...config, "integrity.auto_monitor": e.target.checked ? "true" : "false" })}
                         />
                         <Form.Text muted>
-                            When enabled, movies and TV series will be automatically unmonitored in Radarr/Sonarr after passing integrity checks. 
-                            This prevents re-downloading of verified files. Only applies when using Radarr/Sonarr integration.
+                            When enabled, corrupt files will be automatically monitored in Radarr/Sonarr before deletion, 
+                            triggering automatic re-download. Only applies when using delete actions with Radarr/Sonarr integration.
                         </Form.Text>
                     </Form.Group>
                 </>

@@ -98,13 +98,6 @@ function IntegrityCheckButton() {
     );
 }
 
-// Helper function to format UTC dates for local display
-function formatDateForDisplay(dateString: string): string {
-    // Backend sends UTC dates, convert to local time for display
-    const date = new Date(dateString);
-    return date.toLocaleDateString();
-}
-
 // Helper function to format UTC timestamps for local display  
 function formatTimestampForDisplay(dateString: string): string {
     // Backend sends UTC timestamps, convert to local time for display
@@ -170,14 +163,13 @@ type IntegrityResultsData = {
 export async function loader({ request }: Route.LoaderArgs) {
     try {
         const url = new URL(request.url);
-        const backendUrl = process.env.BACKEND_URL || `${url.protocol}//${url.host}`;
-        const apiKey = process.env.FRONTEND_BACKEND_API_KEY || "";
         
-        const response = await fetch(`${backendUrl}/api/integrity-results`, {
+        // Use frontend proxy instead of direct backend call
+        const response = await fetch(`${url.protocol}//${url.host}/api/integrity-results`, {
             method: "GET",
             headers: {
                 "Content-Type": "application/json",
-                "x-api-key": apiKey
+                "Cookie": request.headers.get("Cookie") || ""
             }
         });
 
@@ -206,15 +198,11 @@ export default function IntegrityResults(props: Route.ComponentProps) {
     // Function to refresh integrity data
     const refreshIntegrityData = useCallback(async () => {
         try {
-            const url = new URL(window.location.href);
-            const backendUrl = process.env.BACKEND_URL || `${url.protocol}//${url.host}`;
-            const apiKey = process.env.FRONTEND_BACKEND_API_KEY || "";
-            
-            const response = await fetch(`${backendUrl}/api/integrity-results`, {
+            // Use frontend proxy instead of direct backend call
+            const response = await fetch("/api/integrity-results", {
                 method: "GET",
                 headers: {
-                    "Content-Type": "application/json",
-                    "x-api-key": apiKey
+                    "Content-Type": "application/json"
                 }
             });
             
@@ -231,15 +219,11 @@ export default function IntegrityResults(props: Route.ComponentProps) {
     const cancelIntegrityCheck = useCallback(async () => {
         setIsCancelling(true);
         try {
-            const url = new URL(window.location.href);
-            const backendUrl = process.env.BACKEND_URL || `${url.protocol}//${url.host}`;
-            const apiKey = process.env.FRONTEND_BACKEND_API_KEY || "";
-            
-            const response = await fetch(`${backendUrl}/api/media-integrity/cancel`, {
+            // Use frontend proxy instead of direct backend call
+            const response = await fetch("/api/media-integrity/cancel", {
                 method: "POST",
                 headers: {
-                    "Content-Type": "application/json",
-                    "x-api-key": apiKey
+                    "Content-Type": "application/json"
                 }
             });
             

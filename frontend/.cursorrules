@@ -1,0 +1,275 @@
+You are an expert in TypeScript, Node.js, React, and Vite.
+
+Response Constraints
+
+- Do not remove any existing code unless necessary.
+- Do not remove my comments or commented-out code unless necessary.
+
+Code Style and Structure
+
+- Write concise, technical TypeScript code with accurate examples.
+- Use functional and declarative programming patterns; avoid classes.
+- Prefer iteration and modularization over code duplication.
+- Use descriptive variable names with auxiliary verbs (e.g., isLoading, hasError).
+- Structure files: exported component, subcomponents, helpers, static content, types.
+
+Naming Conventions
+
+- Use lowercase with dashes for directories (e.g., components/auth-wizard).
+- Favor named exports for components.
+
+TypeScript Usage
+
+- Use TypeScript for all code; prefer interfaces over types.
+- Avoid enums; use maps instead.
+- Use functional components with TypeScript interfaces.
+
+Syntax and Formatting
+
+- Use the "function" keyword for pure functions.
+- Use curly braces for all conditionals. Favor simplicity over cleverness.
+- Use declarative JSX.
+
+UI and Styling
+
+- Use Tailwind for components and styling.
+
+Performance Optimization
+
+- Look for ways to make things faster:
+  - Use immutable data structures
+  - Use efficient data fetching strategies
+  - Optimize network requests
+  - Use efficient data structures
+  - Use efficient algorithms
+  - Use efficient rendering strategies
+  - Use efficient state management
+
+== NzbDAV Frontend Architecture Rules ==
+
+**Core Technology Stack**
+
+Framework & Tools
+
+- React Router v7 with SSR enabled - Full-stack React framework with server-side rendering
+- TypeScript - All code must be written in TypeScript, prefer interfaces over types
+- Vite - Build tool and dev server
+- Express.js - Backend proxy server
+- Bootstrap + React-Bootstrap - Primary UI framework (NOT Tailwind despite .cursorrules)
+- CSS Modules - Scoped styling system
+
+**File Structure & Organization**
+
+Directory Naming
+
+- Use lowercase with dashes for directories: queue-table/, left-navigation/
+- Component directories follow pattern: component-name/component-name.tsx
+
+Component Structure
+
+component-name/
+├── component-name.tsx # Main component
+├── component-name.module.css # Scoped styles
+└── component-name.module.css.d.ts # TypeScript definitions for CSS
+
+Route Structure
+
+routes/
+├── \_index/ # Home page layout with shared components
+├── queue/ # Queue & History page
+├── settings/ # Settings with nested tabs
+├── explore/ # File browser
+└── integrity-results/ # Integrity check results
+
+Styling Rules
+
+- CSS Modules Pattern
+- Every component gets its own .module.css file
+- Import styles as: import styles from "./component.module.css"
+- Use className={styles.className} in JSX
+- Generate TypeScript definitions: .module.css.d.ts files
+- Bootstrap Integration
+- Use React-Bootstrap components: Button, Form, Alert, Card, etc.
+- Import from react-bootstrap: import { Button, Form } from 'react-bootstrap'
+- Global Bootstrap CSS imported in root.tsx
+- CSS Class Naming
+- Use kebab-case in CSS: .queue-icon, .left-navigation
+- Access in TypeScript: styles["queue-icon"], styles.leftNavigation
+
+**React Patterns**
+
+Component Architecture
+
+- Functional components only - No class components
+- Use named exports: export function ComponentName() {}
+- Structure: exported component → subcomponents → helpers → types
+
+TypeScript Integration
+
+- Use interfaces for props: interface ComponentProps {}
+- Route components get: type Route.LoaderArgs and type Route.ActionArgs
+- Prefer interface over type declarations
+
+State Management
+
+- Use React hooks: useState, useEffect, useCallback
+- No external state management (Redux/Zustand)
+- Pass props down through component tree
+
+**Routing & Data Loading**
+
+Route Structure
+
+- File-based routing: routes/page-name/route.tsx
+- Each route exports: loader(), action(), and default component
+- Use useLoaderData() to access server data
+
+Server-Side Data Fetching
+export async function loader({ request }: Route.LoaderArgs) {
+// Fetch data on server before rendering
+const data = await backendClient.getSomeData();
+return { data };
+}
+
+Authentication Flow
+
+- All routes protected except /login and /onboarding
+- Authentication check in root.tsx loader
+- Redirect to /login if not authenticated
+- Session storage handles auth state
+
+**Backend Integration**
+
+Proxy Architecture
+
+- Frontend server proxies API/WebDAV requests to backend
+- Backend URL: process.env.BACKEND_URL
+- Automatic API key injection for authenticated requests
+
+API Communication
+
+- Use frontend proxy instead of direct backend calls
+- Routes: /api/\* → proxied to backend
+- Authentication handled automatically by proxy
+
+Backend Client
+
+- Centralized client: ~/clients/backend-client.server.ts
+- Server-side only (.server.ts suffix)
+- Handles API communication patterns
+
+**Real-Time Updates**
+
+WebSocket Architecture
+
+- Centralized WebSocket server: server/websocket.server.ts
+- Topics-based subscriptions: Subscribe to specific topics
+- Automatic reconnection and authentication
+
+WebSocket Usage Pattern
+
+// Subscribe to topics
+const topicSubscriptions = {
+'topic-name': 'state', // or 'event'
+};
+
+// Handle messages
+useEffect(() => {
+const ws = new WebSocket(window.location.origin.replace(/^http/, 'ws'));
+ws.onmessage = receiveMessage((topic, message) => {
+// Handle real-time updates
+});
+ws.onopen = () => ws.send(JSON.stringify(topicSubscriptions));
+}, []);
+
+Message Types
+
+- State topics: Get current state + updates
+- Event topics: Only receive new events
+- Use receiveMessage() utility for parsing
+
+**Code Style Rules**
+
+Function Declarations
+
+- Use function keyword for pure functions: function ComponentName() {}
+- Use arrow functions for event handlers: const handleClick = () => {}
+
+Naming Conventions
+
+- Components: PascalCase - LeftNavigation
+- Files: kebab-case - left-navigation.tsx
+- Variables: camelCase with auxiliary verbs - isLoading, hasError
+- CSS classes: kebab-case - .left-navigation
+
+Import Organization
+
+- React/Router imports first
+- External libraries
+- Internal utilities (~/utils/, ~/clients/)
+- Relative imports (./component)
+- CSS imports last
+
+**Development Patterns**
+
+Environment Configuration
+
+- Development: npm run dev (port 5173)
+- Build: npm run build (creates build/ directory)
+- TypeScript: npm run typecheck
+
+Server Integration
+
+- Frontend server handles SSR + proxying
+- WebSocket server integrated into Express app
+- Development: Hot reload with Vite
+- Production: Built assets served by Express
+
+Error Handling
+
+- Server errors: Return error objects from loaders
+- Client errors: Use React error boundaries
+- Network errors: Handle in try/catch blocks
+
+**Performance Rules**
+
+Optimization Strategies
+
+- Server-side rendering for initial page load
+- Component-level CSS modules for styling isolation
+- Efficient WebSocket subscriptions (only needed topics)
+- Immutable data patterns for state updates
+
+Bundle Optimization
+
+- Route-based code splitting automatic with React Router
+- CSS modules prevent style conflicts
+- Tree shaking with ES modules
+
+**Conditional Features**
+
+Feature Flags
+
+- Check feature availability in root.tsx loader
+- Pass flags as props to navigation components
+- Example: integrityEnabled controls integrity results nav item
+
+Dynamic Navigation
+
+- Navigation items can be conditionally rendered
+- Based on backend configuration or user permissions
+- Example: Integrity Results only shows if integrity checking enabled
+
+**Deployment Considerations**
+
+Build Process
+
+- Client bundle: Static assets for browser
+- Server bundle: SSR-enabled Express app
+- Asset optimization: Automatic with Vite
+
+Environment Variables
+
+- BACKEND_URL: Backend service location
+- FRONTEND_BACKEND_API_KEY: Authentication key
+- NODE_ENV: Development/production mode

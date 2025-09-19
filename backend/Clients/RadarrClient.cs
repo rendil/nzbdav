@@ -196,6 +196,66 @@ public class RadarrClient : ArrClient
         }
     }
 
+    public async Task<bool> MonitorMovieAsync(string filePath, CancellationToken ct = default)
+    {
+        try
+        {
+            // First, find the movie that contains this file
+            var movies = await GetAsync<RadarrMovie[]>("/api/v3/movie", ct);
+            if (movies == null)
+            {
+                Log.Warning("Failed to retrieve movies from Radarr instance '{InstanceName}' for monitoring", _instanceName);
+                return false;
+            }
+
+            var targetMovie = FindMovieByPath(movies, filePath);
+            if (targetMovie == null)
+            {
+                Log.Warning("Could not find movie with file path '{FilePath}' in Radarr instance '{InstanceName}' for monitoring", 
+                    filePath, _instanceName);
+                return false;
+            }
+
+            // Only monitor if currently unmonitored
+            if (targetMovie.Monitored)
+            {
+                Log.Debug("Movie '{Title}' is already monitored in Radarr instance '{InstanceName}'", 
+                    targetMovie.Title, _instanceName);
+                return true; // Already monitored, consider this success
+            }
+
+            // Update the movie to monitor it
+            var updatePayload = new
+            {
+                id = targetMovie.Id,
+                monitored = true,
+                // Include other required fields to avoid API errors
+                title = targetMovie.Title,
+                tmdbId = targetMovie.TmdbId,
+                year = targetMovie.Year,
+                path = targetMovie.Path
+            };
+
+            var result = await PutAsync<object>($"/api/v3/movie/{targetMovie.Id}", updatePayload, ct);
+            if (result != null)
+            {
+                Log.Information("Successfully monitored movie '{Title}' (ID: {MovieId}) in Radarr instance '{InstanceName}' for re-download after corruption", 
+                    targetMovie.Title, targetMovie.Id, _instanceName);
+                return true;
+            }
+
+            Log.Warning("Failed to monitor movie '{Title}' (ID: {MovieId}) in Radarr instance '{InstanceName}' - no response", 
+                targetMovie.Title, targetMovie.Id, _instanceName);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Error monitoring movie for file '{FilePath}' in Radarr instance '{InstanceName}'", 
+                filePath, _instanceName);
+            return false;
+        }
+    }
+
     private RadarrMovie? FindMovieByPath(RadarrMovie[] movies, string filePath)
     {
         // Strategy 1: Exact full path match (most reliable)

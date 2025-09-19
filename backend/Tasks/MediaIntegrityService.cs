@@ -108,6 +108,111 @@ public class MediaIntegrityService : IDisposable
         }
     }
 
+    public async Task CheckSingleFileIntegrityAsync(DavItem davItem, CancellationToken ct)
+    {
+        Log.Information("Starting single file integrity check for: {FilePath} (ID: {DavItemId})", davItem.Path, davItem.Id);
+        
+        try
+        {
+            await using var dbContext = new DavDatabaseContext();
+            var dbClient = new DavDatabaseClient(dbContext);
+            
+            var runId = Guid.NewGuid().ToString();
+            var (isCorrupt, errorMessage) = await CheckFileIntegrityAsync(davItem, ct);
+            
+            string? actionTaken = null;
+            if (isCorrupt)
+            {
+                Log.Warning("Single file integrity check FAILED for {FilePath}: {ErrorMessage}", davItem.Path, errorMessage);
+                actionTaken = await HandleCorruptFileAsync(dbClient, davItem, davItem.Path, ct);
+            }
+            else
+            {
+                Log.Information("Single file integrity check PASSED for {FilePath}", davItem.Path);
+            }
+            
+            // Store the check results
+            await StoreIntegrityCheckDetailsAsync(dbClient, davItem, !isCorrupt, errorMessage, actionTaken, runId, ct);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Error during single file integrity check for {FilePath}", davItem.Path);
+        }
+    }
+
+    public async Task CheckSingleLibraryFileIntegrityAsync(string filePath, CancellationToken ct)
+    {
+        Log.Information("Starting single library file integrity check for: {FilePath}", filePath);
+        
+        try
+        {
+            await using var dbContext = new DavDatabaseContext();
+            var dbClient = new DavDatabaseClient(dbContext);
+            
+            // Resolve symlink to get the target path (should be in .ids directory)
+            var fileInfo = new FileInfo(filePath);
+            if (!fileInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
+            {
+                Log.Warning("File is not a symlink, unable to check integrity: {FilePath}", filePath);
+                return;
+            }
+
+            var targetPath = fileInfo.ResolveLinkTarget(true)?.FullName;
+            if (string.IsNullOrEmpty(targetPath))
+            {
+                Log.Warning("Could not resolve symlink target for: {FilePath}", filePath);
+                return;
+            }
+
+            // Extract the GUID from the target path (should be the filename in .ids directory)
+            var targetFileName = Path.GetFileName(targetPath);
+            if (!Guid.TryParse(targetFileName, out var davItemId))
+            {
+                Log.Warning("Target path does not contain valid GUID: {TargetPath}", targetPath);
+                return;
+            }
+
+            // Look up the DavItem by ID
+            var davItem = await dbClient.Ctx.Items
+                .Where(item => item.Id == davItemId)
+                .FirstOrDefaultAsync(ct);
+
+            if (davItem == null)
+            {
+                Log.Warning("Could not find DavItem for library file, unable to check integrity: {FilePath} (DavItem ID: {DavItemId})", filePath, davItemId);
+                return;
+            }
+
+            // Check if it's a streamable file type (NZB or RAR)
+            if (davItem.Type != DavItem.ItemType.NzbFile && davItem.Type != DavItem.ItemType.RarFile)
+            {
+                Log.Warning("DavItem is {ItemType}, only NZB and RAR files supported for streaming integrity check: {FilePath}", davItem.Type, filePath);
+                return;
+            }
+            
+            var runId = Guid.NewGuid().ToString();
+            var (isCorrupt, errorMessage) = await CheckFileIntegrityAsync(davItem, ct);
+            
+            string? actionTaken = null;
+            if (isCorrupt)
+            {
+                Log.Warning("Single library file integrity check FAILED for {FilePath}: {ErrorMessage}", filePath, errorMessage);
+                actionTaken = await HandleCorruptFileAsync(dbClient, davItem, filePath, ct);
+            }
+            else
+            {
+                Log.Information("Single library file integrity check PASSED for {FilePath}", filePath);
+            }
+            
+            // Store the check results (use library file path for storage)
+            await StoreIntegrityCheckDetailsAsync(dbClient, filePath, !isCorrupt, errorMessage, actionTaken, runId, ct);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Error during single library file integrity check for {FilePath}", filePath);
+        }
+    }
+
     private async Task StartBackgroundIntegrityCheckAsync(CancellationToken ct)
     {
         Log.Information("Starting background integrity check scheduler");
@@ -265,23 +370,6 @@ public class MediaIntegrityService : IDisposable
                         }
                     }
 
-                    // Auto-unmonitor successful files if enabled
-                    if (!isCorrupt && _configManager.IsAutoUnmonitorEnabled() && checkItem.LibraryFilePath != null)
-                    {
-                        try
-                        {
-                            Log.Debug("Attempting to auto-unmonitor successfully verified file: {FilePath}", checkItem.LibraryFilePath);
-                            var unmonitorSuccess = await _arrManager.UnmonitorFileFromArrAsync(checkItem.LibraryFilePath, ct);
-                            if (unmonitorSuccess)
-                            {
-                                Log.Information("Auto-unmonitored file after successful integrity check: {FilePath}", checkItem.LibraryFilePath);
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            Log.Warning(ex, "Failed to auto-unmonitor file after integrity check: {FilePath}", checkItem.LibraryFilePath);
-                        }
-                    }
 
                     // Note: Integrity check details are now stored in the StoreIntegrityCheckDetailsAsync calls above
                 }
@@ -707,6 +795,28 @@ public class MediaIntegrityService : IDisposable
     private async Task<string> HandleCorruptFileAsync(DavDatabaseClient dbClient, DavItem? davItem, string filePath, CancellationToken ct)
     {
         var action = _configManager.GetCorruptFileAction();
+        
+        // Auto-monitor corrupt files before deletion if enabled (for re-download)
+        if (_configManager.IsAutoMonitorEnabled() && (action == "delete" || action == "delete_via_arr"))
+        {
+            try
+            {
+                Log.Information("Auto-monitoring corrupt file before deletion for re-download: {FilePath}", filePath);
+                var monitorSuccess = await _arrManager.MonitorFileInArrAsync(filePath, ct);
+                if (monitorSuccess)
+                {
+                    Log.Information("Successfully monitored corrupt file for re-download before deletion: {FilePath}", filePath);
+                }
+                else
+                {
+                    Log.Warning("Failed to monitor corrupt file before deletion: {FilePath}", filePath);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "Error monitoring corrupt file before deletion: {FilePath}", filePath);
+            }
+        }
         
         switch (action.ToLowerInvariant())
         {

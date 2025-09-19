@@ -144,7 +144,7 @@ public class ArrManager : IDisposable
         }
     }
 
-    public async Task<bool> UnmonitorFileFromArrAsync(string filePath, CancellationToken ct = default)
+    public async Task<bool> MonitorFileInArrAsync(string filePath, CancellationToken ct = default)
     {
         await _semaphore.WaitAsync(ct);
         try
@@ -161,10 +161,10 @@ public class ArrManager : IDisposable
                 {
                     try
                     {
-                        var success = await radarrClient.UnmonitorMovieAsync(filePath, ct);
+                        var success = await radarrClient.MonitorMovieAsync(filePath, ct);
                         if (success)
                         {
-                            Log.Information("Successfully unmonitored movie for file '{FilePath}' via Radarr instance '{InstanceName}'", 
+                            Log.Information("Successfully monitored movie for file '{FilePath}' via Radarr instance '{InstanceName}' for re-download after corruption", 
                                 filePath, radarrClient.InstanceName);
                             anySuccess = true;
                             // Don't break here - the file might exist in multiple instances
@@ -172,7 +172,7 @@ public class ArrManager : IDisposable
                     }
                     catch (Exception ex)
                     {
-                        Log.Warning(ex, "Failed to unmonitor movie for file '{FilePath}' via Radarr instance '{InstanceName}'", 
+                        Log.Warning(ex, "Failed to monitor movie for file '{FilePath}' via Radarr instance '{InstanceName}'", 
                             filePath, radarrClient.InstanceName);
                     }
                 }
@@ -185,10 +185,10 @@ public class ArrManager : IDisposable
                 {
                     try
                     {
-                        var success = await sonarrClient.UnmonitorSeriesAsync(filePath, ct);
+                        var success = await sonarrClient.MonitorSeriesAsync(filePath, ct);
                         if (success)
                         {
-                            Log.Information("Successfully unmonitored series for file '{FilePath}' via Sonarr instance '{InstanceName}'", 
+                            Log.Information("Successfully monitored series for file '{FilePath}' via Sonarr instance '{InstanceName}' for re-download after corruption", 
                                 filePath, sonarrClient.InstanceName);
                             anySuccess = true;
                             // Don't break here - the file might exist in multiple instances
@@ -199,12 +199,12 @@ public class ArrManager : IDisposable
                         var logLevel = contentType == ContentType.TvShow ? "Warning" : "Debug";
                         if (logLevel == "Warning")
                         {
-                            Log.Warning(ex, "Failed to unmonitor series for file '{FilePath}' via Sonarr instance '{InstanceName}'", 
+                            Log.Warning(ex, "Failed to monitor series for file '{FilePath}' via Sonarr instance '{InstanceName}'", 
                                 filePath, sonarrClient.InstanceName);
                         }
                         else
                         {
-                            Log.Debug(ex, "Failed to unmonitor series for file '{FilePath}' via Sonarr instance '{InstanceName}' - likely a movie file", 
+                            Log.Debug(ex, "Failed to monitor series for file '{FilePath}' via Sonarr instance '{InstanceName}' - likely a movie file", 
                                 filePath, sonarrClient.InstanceName);
                         }
                     }
