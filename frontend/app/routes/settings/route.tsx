@@ -91,7 +91,14 @@ function Body(props: BodyProps) {
     const [isUsenetSettingsReadyToSave, setIsUsenetSettingsReadyToSave] = React.useState(false);
     const [isSaving, setIsSaving] = React.useState(false);
     const [isSaved, setIsSaved] = React.useState(false);
-    const [showAdvanced, setShowAdvanced] = React.useState(false);
+    const [showAdvanced, setShowAdvanced] = React.useState(() => {
+        // Initialize from localStorage if available, default to false
+        if (typeof window !== 'undefined') {
+            const stored = localStorage.getItem('nzbdav-show-advanced-settings');
+            return stored === 'true';
+        }
+        return false;
+    });
     const [activeTab, setActiveTab] = React.useState('usenet');
 
     // derived variables
@@ -138,6 +145,14 @@ function Body(props: BodyProps) {
     const onUsenetSettingsReadyToSave = React.useCallback((isReadyToSave: boolean) => {
         setIsUsenetSettingsReadyToSave(isReadyToSave);
     }, [setIsUsenetSettingsReadyToSave]);
+
+    const onShowAdvancedChange = React.useCallback((checked: boolean) => {
+        setShowAdvanced(checked);
+        // Persist to localStorage
+        if (typeof window !== 'undefined') {
+            localStorage.setItem('nzbdav-show-advanced-settings', checked.toString());
+        }
+    }, [setShowAdvanced]);
 
     const onSave = React.useCallback(async () => {
         setIsSaving(true);
@@ -203,7 +218,7 @@ function Body(props: BodyProps) {
                 id="advanced-settings-checkbox"
                 label="Show Advanced Settings"
                 checked={showAdvanced}
-                onChange={(e) => setShowAdvanced(Boolean(e.target.checked))} />
+                onChange={(e) => onShowAdvancedChange(Boolean(e.target.checked))} />
 
             {isUpdated && <Button
                 className={styles.button}

@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using NzbWebDAV.Api.Controllers;
 using NzbWebDAV.Database;
 using NzbWebDAV.Database.Models;
+using Serilog;
 
 namespace NzbWebDAV.Api.Controllers.IntegrityResults;
 
@@ -92,15 +93,29 @@ public class IntegrityResultsController(DavDatabaseClient dbClient) : BaseApiCon
                 }
             }
 
+            // Parse the timestamp more carefully
+            DateTime parsedLastChecked = DateTime.MinValue;
+            if (!string.IsNullOrEmpty(lastCheckConfig.ConfigValue))
+            {
+                if (DateTime.TryParse(lastCheckConfig.ConfigValue, out var tempLastChecked))
+                {
+                    parsedLastChecked = tempLastChecked;
+                    Log.Debug("Parsed timestamp for {FileId}: {OriginalValue} -> {ParsedValue} (Date: {DatePart})", 
+                        fileId, lastCheckConfig.ConfigValue, parsedLastChecked, parsedLastChecked.Date);
+                }
+                else
+                {
+                    Log.Warning("Failed to parse timestamp for {FileId}: {Value}", fileId, lastCheckConfig.ConfigValue);
+                }
+            }
+
             var result = new IntegrityFileResult
             {
                 FileId = fileId,
                 FilePath = filePath,
                 FileName = fileName,
                 IsLibraryFile = isLibraryFile,
-                LastChecked = DateTime.TryParse(lastCheckConfig.ConfigValue, out var lastChecked) 
-                    ? lastChecked 
-                    : DateTime.MinValue,
+                LastChecked = parsedLastChecked,
                 Status = statusConfig?.ConfigValue ?? "unknown"
             };
 
@@ -112,17 +127,29 @@ public class IntegrityResultsController(DavDatabaseClient dbClient) : BaseApiCon
             .OrderByDescending(r => r.LastChecked)
             .ToList();
 
-        // Group by date for job runs
+        // Group by date for job runs (use local date to match what users see)
         var jobRuns = fileResults
             .Where(r => r.LastChecked != DateTime.MinValue)
-            .GroupBy(r => r.LastChecked.Date)
-            .Select(g => new IntegrityJobRun
-            {
-                Date = g.Key,
-                TotalFiles = g.Count(),
-                CorruptFiles = g.Count(f => f.Status == "corrupt"),
-                ValidFiles = g.Count(f => f.Status == "valid"),
-                Files = g.ToList()
+            .GroupBy(r => r.LastChecked.Date) // Keep local date grouping
+            .Select(g => {
+                Log.Debug("Creating job run for date {Date} with {FileCount} files", g.Key, g.Count());
+                var files = g.OrderByDescending(f => f.LastChecked).ToList();
+                
+                // Log first few files to debug the grouping issue
+                for (int i = 0; i < Math.Min(3, files.Count); i++)
+                {
+                    Log.Debug("  File {Index}: {FileName} checked at {LastChecked} (grouped under {GroupDate})", 
+                        i + 1, files[i].FileName, files[i].LastChecked, g.Key);
+                }
+                
+                return new IntegrityJobRun
+                {
+                    Date = g.Key,
+                    TotalFiles = g.Count(),
+                    CorruptFiles = g.Count(f => f.Status == "corrupt"),
+                    ValidFiles = g.Count(f => f.Status == "valid"),
+                    Files = files
+                };
             })
             .OrderByDescending(j => j.Date)
             .ToList();
