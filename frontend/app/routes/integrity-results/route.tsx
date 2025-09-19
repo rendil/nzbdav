@@ -357,27 +357,7 @@ export default function IntegrityResults(props: Route.ComponentProps) {
         <div className="container mt-4">
             <div className="d-flex justify-content-between align-items-center mb-4">
                 <h1>Media Integrity Results</h1>
-                <div className="d-flex gap-2">
-                    <IntegrityCheckButton />
-                    {isCheckRunning && (
-                        <Button
-                            variant="outline-danger"
-                            onClick={cancelIntegrityCheck}
-                            disabled={isCancelling}
-                        >
-                            {isCancelling ? (
-                                <>
-                                    <div className="spinner-border spinner-border-sm me-2" role="status">
-                                        <span className="visually-hidden">Cancelling...</span>
-                                    </div>
-                                    Cancelling...
-                                </>
-                            ) : (
-                                <>✕ Cancel Check</>
-                            )}
-                        </Button>
-                    )}
-                </div>
+                <IntegrityCheckButton />
             </div>
             
             
@@ -411,29 +391,39 @@ function JobRunsList({ jobRuns, isCheckRunning }: { jobRuns: IntegrityJobRun[]; 
 
         // Find the run that's most likely active
         const findActiveRun = () => {
-            if (!isCheckRunning || jobRuns.length === 0) return null;
+            if (!isCheckRunning || jobRuns.length === 0) {
+                console.debug("No active run - isCheckRunning:", isCheckRunning, "jobRuns.length:", jobRuns.length);
+                return null;
+            }
             
-            const now = new Date();
-            const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000);
-            
-            // First, look for a run that has a start time but no end time (actively running)
+            // First priority: look for a run that has a start time but no end time (actively running)
             for (const run of jobRuns) {
                 if (run.startTime && !run.endTime) {
-                    const startTime = new Date(run.startTime);
-                    // Only consider it active if it started recently
-                    if (startTime >= fiveMinutesAgo) {
-                        return run;
-                    }
+                    console.debug("Found active run (no end time):", run.runId, "started:", run.startTime);
+                    return run; // This is definitely an active run
                 }
             }
             
-            // If no actively running run found, look for the most recent run that started recently
+            // Second priority: if WebSocket says check is running, find the most recent run
+            // This handles cases where the run data hasn't been refreshed yet with end time
+            const now = new Date();
+            const thirtyMinutesAgo = new Date(now.getTime() - 30 * 60 * 1000); // Extend window for longer checks
+            
             for (const run of jobRuns) {
                 const runTime = run.startTime ? new Date(run.startTime) : new Date(run.date);
-                if (runTime >= fiveMinutesAgo) {
+                // If the run started within the last 30 minutes and we have an active check, assume it's active
+                if (runTime >= thirtyMinutesAgo) {
+                    console.debug("Found recent run as active:", run.runId, "started:", run.startTime || run.date);
                     return run;
                 }
             }
+            
+            console.debug("No active run found despite check running. Runs:", jobRuns.map(r => ({ 
+                runId: r.runId, 
+                startTime: r.startTime, 
+                endTime: r.endTime,
+                date: r.date 
+            })));
             
             // If check is running but no recent runs found, don't show any as active
             // This prevents showing old runs as active when a new check just started
@@ -516,13 +506,34 @@ function JobRunsList({ jobRuns, isCheckRunning }: { jobRuns: IntegrityJobRun[]; 
                                         {run.corruptFiles} corrupt
                                     </Badge>
                                 )}
-                                <Button
-                                    variant="outline-secondary"
-                                    size="sm"
-                                    onClick={() => toggleRun(run.date)}
-                                >
-                                    {expandedRuns.has(run.date) ? "Hide" : "Show"} Files
-                                </Button>
+                                <div className="d-flex gap-2">
+                                    <Button
+                                        variant="outline-secondary"
+                                        size="sm"
+                                        onClick={() => toggleRun(run.date)}
+                                    >
+                                        {expandedRuns.has(run.date) ? "Hide" : "Show"} Files
+                                    </Button>
+                                    {isActiveRun && isCheckRunning && (
+                                        <Button
+                                            variant="outline-danger"
+                                            size="sm"
+                                            onClick={cancelIntegrityCheck}
+                                            disabled={isCancelling}
+                                        >
+                                            {isCancelling ? (
+                                                <>
+                                                    <div className="spinner-border spinner-border-sm me-1" role="status">
+                                                        <span className="visually-hidden">Cancelling...</span>
+                                                    </div>
+                                                    Cancelling...
+                                                </>
+                                            ) : (
+                                                <>✕ Cancel</>
+                                            )}
+                                        </Button>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     </Card.Header>
