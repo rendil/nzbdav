@@ -26,27 +26,39 @@ const setApiKeyForAuthenticatedRequests = async (req: express.Request) => {
   var apikey = req.query.apikey || req.query.apiKey || req.headers["x-api-key"];
   var hasApiKey = apikey && typeof apikey === "string";
 
+  // Debug logging
+  console.log(`[AUTH DEBUG] Path: ${req.path}`);
+  console.log(`[AUTH DEBUG] Has existing API key: ${hasApiKey}`);
+  console.log(
+    `[AUTH DEBUG] FRONTEND_BACKEND_API_KEY set: ${!!process.env.FRONTEND_BACKEND_API_KEY}`
+  );
+  console.log(`[AUTH DEBUG] Cookie header: ${!!req.headers.cookie}`);
+
   // if the request already has an apikey, do nothing
   if (hasApiKey) return;
 
   // if the request is not authenticated, do nothing
   const authenticated = await isAuthenticated(req.headers.cookie);
+  console.log(`[AUTH DEBUG] User authenticated: ${authenticated}`);
   if (!authenticated) return;
 
   // otherwise, set the api key header
   req.headers["x-api-key"] = process.env.FRONTEND_BACKEND_API_KEY || "";
-}
+  console.log(
+    `[AUTH DEBUG] Added API key header: ${!!req.headers["x-api-key"]}`
+  );
+};
 
 app.use(async (req, res, next) => {
   if (
-    req.method.toUpperCase() === "PROPFIND"
-    || req.method.toUpperCase() === "OPTIONS"
-    || req.path.startsWith("/api")
-    || req.path.startsWith("/view")
-    || req.path.startsWith("/.ids")
-    || req.path.startsWith("/nzbs")
-    || req.path.startsWith("/content")
-    || req.path.startsWith("/completed-symlinks")
+    req.method.toUpperCase() === "PROPFIND" ||
+    req.method.toUpperCase() === "OPTIONS" ||
+    req.path.startsWith("/api") ||
+    req.path.startsWith("/view") ||
+    req.path.startsWith("/.ids") ||
+    req.path.startsWith("/nzbs") ||
+    req.path.startsWith("/content") ||
+    req.path.startsWith("/completed-symlinks")
   ) {
     await setApiKeyForAuthenticatedRequests(req);
     return forwardToBackend(req, res, next);
@@ -63,5 +75,5 @@ app.use(
         VALUE_FROM_EXPRESS: "Hello from Express",
       };
     },
-  }),
+  })
 );
