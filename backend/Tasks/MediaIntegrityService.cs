@@ -1124,60 +1124,6 @@ public class MediaIntegrityService : IDisposable
         await dbClient.Ctx.SaveChangesAsync(ct);
     }
 
-    private async Task StartBackgroundIntegrityCheckAsync(CancellationToken ct)
-    {
-        Log.Information("Starting background integrity check scheduler");
-        
-        while (!ct.IsCancellationRequested)
-        {
-            try
-            {
-                // Check if a check is needed based on last check time
-                var shouldRunCheck = await ShouldRunBackgroundCheckAsync(ct);
-                
-                if (shouldRunCheck)
-                {
-                    Log.Information("Background integrity check is due, starting check");
-                    
-                    await StaticSemaphore.WaitAsync(ct);
-                    try
-                    {
-                        if (_runningTask is { IsCompleted: false })
-                        {
-                            Log.Debug("Integrity check already running, skipping background check");
-                            continue; // Skip if already running
-                        }
-                            
-                        _runningTask = Task.Run(() => PerformIntegrityCheckAsync(ct), ct);
-                        await _runningTask;
-                    }
-                    finally
-                    {
-                        StaticSemaphore.Release();
-                    }
-                }
-                else
-                {
-                    Log.Debug("Background integrity check not due yet");
-                }
-                
-                // Wait 10 minutes before checking again
-                await Task.Delay(TimeSpan.FromMinutes(10), ct);
-            }
-            catch (OperationCanceledException)
-            {
-                Log.Information("Background integrity check scheduler cancelled");
-                break;
-            }
-            catch (Exception ex)
-            {
-                Log.Error(ex, "Error in background integrity check scheduler");
-                // Wait before retrying on error
-                await Task.Delay(TimeSpan.FromMinutes(30), ct);
-            }
-        }
-    }
-
     private async Task<bool> ShouldRunBackgroundCheckAsync(CancellationToken ct)
     {
         try
