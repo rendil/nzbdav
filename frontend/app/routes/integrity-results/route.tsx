@@ -90,17 +90,10 @@ export default function IntegrityResults(props: Route.ComponentProps) {
                     <p>No integrity checks have been completed yet. Check your settings to enable integrity checking.</p>
                 </Alert>
             ) : (
-                <>
-                    <div className="mb-4">
-                        <h3>Job Runs Summary</h3>
-                        <JobRunsList jobRuns={data.jobRuns} />
-                    </div>
-                    
-                    <div className="mb-4">
-                        <h3>All Files</h3>
-                        <FilesTable files={data.allFiles} />
-                    </div>
-                </>
+                <div className="mb-4">
+                    <h3>Integrity Check Results by Date</h3>
+                    <JobRunsList jobRuns={data.jobRuns} />
+                </div>
             )}
         </div>
     );
@@ -174,7 +167,6 @@ function FilesTable({ files }: { files: IntegrityFileResult[] }) {
                     <th>File Name</th>
                     <th>File Path</th>
                     <th>Last Checked</th>
-                    <th>Type</th>
                     <th>Error</th>
                     <th>Action Taken</th>
                 </tr>
@@ -191,11 +183,6 @@ function FilesTable({ files }: { files: IntegrityFileResult[] }) {
                         </td>
                         <td>
                             {new Date(file.lastChecked).toLocaleString()}
-                        </td>
-                        <td>
-                            <Badge bg={file.isLibraryFile ? "primary" : "secondary"}>
-                                {file.isLibraryFile ? "Library" : "Internal"}
-                            </Badge>
                         </td>
                         <td>
                             {file.errorMessage ? (
