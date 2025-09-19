@@ -109,14 +109,15 @@ public class IntegrityResultsController(DavDatabaseClient dbClient) : BaseApiCon
                 }
             }
 
-            // Parse the timestamp more carefully
+            // Parse the timestamp more carefully and ensure local time for consistent grouping
             DateTime parsedLastChecked = DateTime.MinValue;
             if (!string.IsNullOrEmpty(lastCheckConfig.ConfigValue))
             {
                 if (DateTime.TryParse(lastCheckConfig.ConfigValue, out var tempLastChecked))
                 {
-                    parsedLastChecked = tempLastChecked;
-                    Log.Debug("Parsed timestamp for {FileId}: {OriginalValue} -> {ParsedValue} (Date: {DatePart})", 
+                    // Convert to local time to ensure consistent date grouping
+                    parsedLastChecked = tempLastChecked.ToLocalTime();
+                    Log.Debug("Parsed timestamp for {FileId}: {OriginalValue} -> {ParsedValue} (Local Date: {DatePart})", 
                         fileId, lastCheckConfig.ConfigValue, parsedLastChecked, parsedLastChecked.Date);
                 }
                 else
@@ -148,7 +149,13 @@ public class IntegrityResultsController(DavDatabaseClient dbClient) : BaseApiCon
         // Group by date for job runs (use local date to match what users see)
         var jobRuns = fileResults
             .Where(r => r.LastChecked != DateTime.MinValue)
-            .GroupBy(r => r.LastChecked.Date) // Keep local date grouping
+            .GroupBy(r => {
+                // Ensure we're grouping by local date only (strip time component)
+                var localDate = r.LastChecked.ToLocalTime().Date;
+                Log.Debug("Grouping file {FileName} with timestamp {LastChecked} under date {GroupDate}", 
+                    r.FileName, r.LastChecked, localDate);
+                return localDate;
+            })
             .Select(g => {
                 Log.Debug("Creating job run for date {Date} with {FileCount} files", g.Key, g.Count());
                 var files = g.OrderByDescending(f => f.LastChecked).ToList();
@@ -156,8 +163,8 @@ public class IntegrityResultsController(DavDatabaseClient dbClient) : BaseApiCon
                 // Log first few files to debug the grouping issue
                 for (int i = 0; i < Math.Min(3, files.Count); i++)
                 {
-                    Log.Debug("  File {Index}: {FileName} checked at {LastChecked} (grouped under {GroupDate})", 
-                        i + 1, files[i].FileName, files[i].LastChecked, g.Key);
+                    Log.Debug("  File {Index}: {FileName} checked at {LastChecked} (local: {LocalTime}) grouped under {GroupDate}", 
+                        i + 1, files[i].FileName, files[i].LastChecked, files[i].LastChecked.ToLocalTime(), g.Key);
                 }
                 
                 return new IntegrityJobRun
