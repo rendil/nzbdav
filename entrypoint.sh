@@ -67,15 +67,15 @@ chown $PUID:$PGID /config
 # Run backend database migration
 cd /app/backend
 echo "Running database maintenance."
-su-exec appuser ./NzbWebDAV --db-migration
+su-exec appuser env FRONTEND_BACKEND_API_KEY="$FRONTEND_BACKEND_API_KEY" ./NzbWebDAV --db-migration
 if [ $? -ne 0 ]; then
     echo "Database migration failed. Exiting with error code $?."
     exit $?
 fi
 echo "Done with database maintenance."
 
-# Run backend as appuser in background
-su-exec appuser ./NzbWebDAV &
+# Run backend as appuser in background with environment variables
+su-exec appuser env FRONTEND_BACKEND_API_KEY="$FRONTEND_BACKEND_API_KEY" ./NzbWebDAV &
 BACKEND_PID=$!
 
 # Wait for backend health check
@@ -101,9 +101,9 @@ while true; do
     sleep "$MAX_BACKEND_HEALTH_RETRY_DELAY"
 done
 
-# Run frontend as appuser in background
+# Run frontend as appuser in background with environment variables
 cd /app/frontend
-su-exec appuser npm run start &
+su-exec appuser env FRONTEND_BACKEND_API_KEY="$FRONTEND_BACKEND_API_KEY" BACKEND_URL="$BACKEND_URL" npm run start &
 FRONTEND_PID=$!
 
 # Wait for either to exit
