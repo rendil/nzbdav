@@ -95,11 +95,22 @@ function Body(props: BodyProps) {
         // Initialize from localStorage if available, default to false
         if (typeof window !== 'undefined') {
             const stored = localStorage.getItem('nzbdav-show-advanced-settings');
+            console.log('[DEBUG] Loading show-advanced from localStorage:', stored);
             return stored === 'true';
         }
+        console.log('[DEBUG] window not available, defaulting show-advanced to false');
         return false;
     });
     const [activeTab, setActiveTab] = React.useState('usenet');
+
+    // Debug effect to track localStorage on component mount
+    React.useEffect(() => {
+        if (typeof window !== 'undefined') {
+            const currentValue = localStorage.getItem('nzbdav-show-advanced-settings');
+            console.log('[DEBUG] Component mounted, localStorage value:', currentValue);
+            console.log('[DEBUG] showAdvanced state:', showAdvanced);
+        }
+    }, [showAdvanced]);
 
     // derived variables
     const iseUsenetUpdated = isUsenetSettingsUpdated(config, newConfig);
@@ -147,10 +158,15 @@ function Body(props: BodyProps) {
     }, [setIsUsenetSettingsReadyToSave]);
 
     const onShowAdvancedChange = React.useCallback((checked: boolean) => {
+        console.log('[DEBUG] Setting show-advanced to:', checked);
         setShowAdvanced(checked);
         // Persist to localStorage
         if (typeof window !== 'undefined') {
             localStorage.setItem('nzbdav-show-advanced-settings', checked.toString());
+            console.log('[DEBUG] Saved show-advanced to localStorage:', checked.toString());
+            // Verify it was saved
+            const verification = localStorage.getItem('nzbdav-show-advanced-settings');
+            console.log('[DEBUG] Verification read from localStorage:', verification);
         }
     }, [setShowAdvanced]);
 
@@ -212,13 +228,20 @@ function Body(props: BodyProps) {
             </Tabs>
             <hr />
 
-            <Form.Check
-                style={{ marginBottom: '20px' }}
-                type="checkbox"
-                id="advanced-settings-checkbox"
-                label="Show Advanced Settings"
-                checked={showAdvanced}
-                onChange={(e) => onShowAdvancedChange(Boolean(e.target.checked))} />
+            <div className="d-flex align-items-center" style={{ marginBottom: '20px' }}>
+                <Form.Check
+                    type="checkbox"
+                    id="advanced-settings-checkbox"
+                    label="Show Advanced Settings"
+                    checked={showAdvanced}
+                    onChange={(e) => onShowAdvancedChange(Boolean(e.target.checked))}
+                />
+                {typeof window !== 'undefined' && (
+                    <small className="text-muted ms-2">
+                        (localStorage: {localStorage.getItem('nzbdav-show-advanced-settings') || 'null'})
+                    </small>
+                )}
+            </div>
 
             {isUpdated && <Button
                 className={styles.button}
