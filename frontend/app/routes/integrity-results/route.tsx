@@ -369,14 +369,29 @@ export default function IntegrityResults(props: Route.ComponentProps) {
             ) : (
                 <div className="mb-4">
                     <h3>Integrity Check Results by Execution</h3>
-                    <JobRunsList jobRuns={liveData.jobRuns} isCheckRunning={isCheckRunning} />
+                    <JobRunsList 
+                        jobRuns={liveData.jobRuns} 
+                        isCheckRunning={isCheckRunning} 
+                        cancelIntegrityCheck={cancelIntegrityCheck}
+                        isCancelling={isCancelling}
+                    />
                 </div>
             )}
         </div>
     );
 }
 
-function JobRunsList({ jobRuns, isCheckRunning }: { jobRuns: IntegrityJobRun[]; isCheckRunning?: boolean }) {
+function JobRunsList({ 
+    jobRuns, 
+    isCheckRunning, 
+    cancelIntegrityCheck, 
+    isCancelling 
+}: { 
+    jobRuns: IntegrityJobRun[]; 
+    isCheckRunning?: boolean; 
+    cancelIntegrityCheck: () => Promise<void>;
+    isCancelling: boolean;
+}) {
     const [expandedRuns, setExpandedRuns] = useState<Set<string>>(new Set());
 
     const toggleRun = (date: string) => {
