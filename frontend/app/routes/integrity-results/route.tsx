@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Card, Table, Badge, Alert, Button, Collapse } from "react-bootstrap";
 import { receiveMessage } from "../../utils/websocket-util";
 
-const integrityProgressTopic = { topic: "IntegrityCheckProgress" };
+const integrityProgressTopic = { 'icp': 'state' };
 
 // Integrity Check Button Component
 function IntegrityCheckButton() {

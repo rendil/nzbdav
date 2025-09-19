@@ -56,25 +56,20 @@ public class MediaIntegrityService : IDisposable
     public async Task<bool> TriggerManualIntegrityCheckAsync()
     {
         await StaticSemaphore.WaitAsync();
-        Task? task;
         try
         {
             // if the task is already running, return immediately.
             if (_runningTask is { IsCompleted: false })
                 return false;
 
-            // otherwise, run the task.
+            // otherwise, start the task and return immediately (don't wait for completion).
             _runningTask = Task.Run(() => PerformIntegrityCheckAsync(_cancellationTokenSource.Token));
-            task = _runningTask;
+            return true;
         }
         finally
         {
             StaticSemaphore.Release();
         }
-
-        // and wait for it to finish.
-        await task;
-        return true;
     }
 
     private async Task StartBackgroundIntegrityCheckAsync(CancellationToken ct)
@@ -735,6 +730,26 @@ public class MediaIntegrityService : IDisposable
     {
         var fileHash = GetFilePathHash(filePath);
         await StoreIntegrityCheckDetailsForHashAsync(dbClient, fileHash, isValid, errorMessage, actionTaken, runId, ct);
+        
+        // Also store the file path for display purposes (library files)
+        var pathConfigName = $"integrity.path.library.{fileHash}";
+        var pathConfig = await dbClient.Ctx.ConfigItems
+            .FirstOrDefaultAsync(c => c.ConfigName == pathConfigName, ct);
+            
+        if (pathConfig != null)
+        {
+            pathConfig.ConfigValue = filePath;
+        }
+        else
+        {
+            dbClient.Ctx.ConfigItems.Add(new ConfigItem
+            {
+                ConfigName = pathConfigName,
+                ConfigValue = filePath
+            });
+        }
+        
+        await dbClient.Ctx.SaveChangesAsync(ct);
     }
 
     private async Task StoreIntegrityCheckDetailsAsync(DavDatabaseClient dbClient, DavItem davItem, bool isValid, string? errorMessage, string? actionTaken, string runId, CancellationToken ct)
