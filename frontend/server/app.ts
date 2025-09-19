@@ -26,34 +26,21 @@ const setApiKeyForAuthenticatedRequests = async (req: express.Request) => {
   var apikey = req.query.apikey || req.query.apiKey || req.headers["x-api-key"];
   var hasApiKey = apikey && typeof apikey === "string";
 
-  // Debug logging
-  console.log(`[AUTH DEBUG] Path: ${req.path}`);
-  console.log(`[AUTH DEBUG] Has existing API key: ${hasApiKey}`);
-  console.log(
-    `[AUTH DEBUG] FRONTEND_BACKEND_API_KEY set: ${!!process.env.FRONTEND_BACKEND_API_KEY}`
-  );
-  console.log(`[AUTH DEBUG] Cookie header: ${!!req.headers.cookie}`);
-
   // if the request already has an apikey, do nothing
   if (hasApiKey) return;
 
   // if the request is not authenticated, do nothing
   const authenticated = await isAuthenticated(req.headers.cookie);
-  console.log(`[AUTH DEBUG] User authenticated: ${authenticated}`);
 
-  // TEMPORARY FIX: For server-side rendering, add API key even if not authenticated
+  // For server-side rendering, add API key even if not authenticated
   // This allows the loader to work during SSR when cookies might not be properly forwarded
   const isServerSideRequest =
     !req.headers.cookie || req.headers.cookie.length === 0;
-  console.log(`[AUTH DEBUG] Is server-side request: ${isServerSideRequest}`);
 
   if (!authenticated && !isServerSideRequest) return;
 
   // otherwise, set the api key header
   req.headers["x-api-key"] = process.env.FRONTEND_BACKEND_API_KEY || "";
-  console.log(
-    `[AUTH DEBUG] Added API key header: ${!!req.headers["x-api-key"]}`
-  );
 };
 
 app.use(async (req, res, next) => {
