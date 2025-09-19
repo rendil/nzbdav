@@ -56,7 +56,7 @@ function IntegrityCheckButton() {
             const response = await fetch("/api/media-integrity", {
                 method: "POST",
                 headers: {
-                    'Content-Type': 'application/json'
+                    'Content-Type': 'application/json;charset=UTF-8'
                 }
             });
             if (!response.ok) {
@@ -160,9 +160,11 @@ type IntegrityResultsData = {
     allFiles: IntegrityFileResult[];
 };
 
-export async function loader() {
+export async function loader({ request }: Route.LoaderArgs) {
     try {
-        const response = await fetch("/api/integrity-results", {
+        const url = new URL(request.url);
+        // Use frontend proxy instead of direct backend call - construct absolute URL for server-side rendering
+        const response = await fetch(`${url.protocol}//${url.host}/api/integrity-results`, {
             method: "GET",
             headers: {
                 "Content-Type": "application/json;charset=UTF-8"
@@ -179,7 +181,7 @@ export async function loader() {
         return { data, error: null };
     } catch (error) {
         console.error("Failed to load integrity results:", error);
-        return { data: null, error: "Failed to load integrity results" };
+        return { data: null, error: `Failed to load integrity results: ${error instanceof Error ? error.message : String(error)}` };
     }
 }
 
