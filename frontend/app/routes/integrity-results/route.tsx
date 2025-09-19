@@ -500,7 +500,7 @@ export default function IntegrityResults(props: Route.ComponentProps) {
                                 className="btn btn-outline-primary btn-sm"
                                 onClick={() => setTimeFilter("< 7 days")}
                             >
-                                Show More Results
+                                Expand Time Range
                             </button>
                         </div>
                     )}
