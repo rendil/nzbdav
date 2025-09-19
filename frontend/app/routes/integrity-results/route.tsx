@@ -167,7 +167,8 @@ export async function loader({ request }: Route.LoaderArgs) {
         const response = await fetch(`${url.protocol}//${url.host}/api/integrity-results`, {
             method: "GET",
             headers: {
-                "Content-Type": "application/json;charset=UTF-8"
+                "Content-Type": "application/json;charset=UTF-8",
+                "Cookie": request.headers.get("Cookie") || "" // Pass cookie for authentication
             }
         });
 
