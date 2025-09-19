@@ -110,35 +110,52 @@ public class MediaIntegrityService : IDisposable
 
     private async Task StartBackgroundIntegrityCheckAsync(CancellationToken ct)
     {
-        var checkIntervalHours = _configManager.GetIntegrityCheckIntervalHours();
+        Log.Information("Starting background integrity check scheduler");
         
         while (!ct.IsCancellationRequested)
         {
             try
             {
-                await Task.Delay(TimeSpan.FromHours(checkIntervalHours), ct);
+                // Check if a check is needed based on last check time
+                var shouldRunCheck = await ShouldRunBackgroundCheckAsync(ct);
                 
-                await StaticSemaphore.WaitAsync(ct);
-                try
+                if (shouldRunCheck)
                 {
-                    if (_runningTask is { IsCompleted: false })
-                        continue; // Skip if already running
-                        
-                    _runningTask = Task.Run(() => PerformIntegrityCheckAsync(ct), ct);
-                    await _runningTask;
+                    Log.Information("Background integrity check is due, starting check");
+                    
+                    await StaticSemaphore.WaitAsync(ct);
+                    try
+                    {
+                        if (_runningTask is { IsCompleted: false })
+                        {
+                            Log.Debug("Integrity check already running, skipping background check");
+                            continue; // Skip if already running
+                        }
+                            
+                        _runningTask = Task.Run(() => PerformIntegrityCheckAsync(ct), ct);
+                        await _runningTask;
+                    }
+                    finally
+                    {
+                        StaticSemaphore.Release();
+                    }
                 }
-                finally
+                else
                 {
-                    StaticSemaphore.Release();
+                    Log.Debug("Background integrity check not due yet");
                 }
+                
+                // Wait 10 minutes before checking again
+                await Task.Delay(TimeSpan.FromMinutes(10), ct);
             }
             catch (OperationCanceledException)
             {
+                Log.Information("Background integrity check scheduler cancelled");
                 break;
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "Error in background integrity check");
+                Log.Error(ex, "Error in background integrity check scheduler");
                 // Wait before retrying on error
                 await Task.Delay(TimeSpan.FromMinutes(30), ct);
             }
@@ -995,6 +1012,52 @@ public class MediaIntegrityService : IDisposable
         }
 
         await dbClient.Ctx.SaveChangesAsync(ct);
+    }
+
+    private async Task<bool> ShouldRunBackgroundCheckAsync(CancellationToken ct)
+    {
+        try
+        {
+            var intervalHours = _configManager.GetIntegrityCheckIntervalHours();
+            var intervalDays = _configManager.GetIntegrityCheckIntervalDays();
+            
+            // Use the more restrictive of the two intervals
+            var effectiveIntervalHours = Math.Max(intervalHours, intervalDays * 24);
+            
+            await using var dbContext = new DavDatabaseContext();
+            var dbClient = new DavDatabaseClient(dbContext);
+            
+            // Get the most recent check time from any file
+            var mostRecentConfig = await dbClient.Ctx.ConfigItems
+                .Where(c => c.ConfigName.StartsWith("integrity.last_check."))
+                .OrderByDescending(c => c.ConfigValue)
+                .FirstOrDefaultAsync(ct);
+                
+            if (mostRecentConfig == null)
+            {
+                Log.Information("No previous integrity checks found, background check is due");
+                return true; // No previous checks, so run now
+            }
+            
+            if (!DateTime.TryParse(mostRecentConfig.ConfigValue, out var lastCheckTime))
+            {
+                Log.Warning("Could not parse last check time: {ConfigValue}", mostRecentConfig.ConfigValue);
+                return true; // Invalid date, assume we should check
+            }
+            
+            var timeSinceLastCheck = DateTime.UtcNow - lastCheckTime.ToUniversalTime();
+            var hoursUntilNext = effectiveIntervalHours - timeSinceLastCheck.TotalHours;
+            
+            Log.Debug("Background check evaluation: Last check {LastCheck}, hours since: {HoursSince:F1}, interval: {Interval}h, hours until next: {UntilNext:F1}", 
+                lastCheckTime, timeSinceLastCheck.TotalHours, effectiveIntervalHours, hoursUntilNext);
+            
+            return hoursUntilNext <= 0; // Check is due if we've passed the interval
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Error determining if background check should run");
+            return false; // Don't run on error
+        }
     }
 
     public void Dispose()
