@@ -428,17 +428,22 @@ function JobRunsList({
             return null;
         }
         
-        // First priority: if we have a current run ID from WebSocket, find exact match
+        // If we have a current run ID from WebSocket, ONLY use exact matching
         if (currentRunId) {
             const exactMatch = jobRuns.find(run => run.runId === currentRunId);
             if (exactMatch) {
                 console.debug("Found exact run ID match:", currentRunId);
                 return exactMatch;
             }
-            console.debug("Current run ID not found in data yet:", currentRunId);
+            // If we have a run ID but no match yet, don't show any run as active
+            console.debug("Current run ID not found in data yet, showing no active run:", currentRunId);
+            return null;
         }
         
-        // Second priority: look for a run that has a start time but no end time (actively running)
+        // Only use fallback logic if we don't have a run ID yet (early startup)
+        console.debug("No current run ID yet, using fallback detection");
+        
+        // Fallback: look for a run that has a start time but no end time (actively running)
         for (const run of jobRuns) {
             if (run.startTime && !run.endTime) {
                 console.debug("Found active run (no end time):", run.runId, "started:", run.startTime);
@@ -446,29 +451,27 @@ function JobRunsList({
             }
         }
         
-        // Third priority: if WebSocket says check is running, find the most recent run
-        // This handles cases where the run data hasn't been refreshed yet with end time
+        // Last resort: if WebSocket says check is running but no run ID yet, find the most recent run
+        // This should only happen for a very brief moment during startup
         const now = new Date();
-        const thirtyMinutesAgo = new Date(now.getTime() - 30 * 60 * 1000); // Extend window for longer checks
+        const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000); // Shorter window to reduce false positives
         
         for (const run of jobRuns) {
             const runTime = run.startTime ? new Date(run.startTime) : new Date(run.date);
-            // If the run started within the last 30 minutes and we have an active check, assume it's active
-            if (runTime >= thirtyMinutesAgo) {
-                console.debug("Found recent run as fallback active:", run.runId, "started:", run.startTime || run.date);
+            // Only consider very recent runs and only if we don't have a run ID yet
+            if (runTime >= fiveMinutesAgo) {
+                console.debug("Found recent run as temporary fallback active:", run.runId, "started:", run.startTime || run.date);
                 return run;
             }
         }
         
-        console.debug("No active run found despite check running. Current run ID:", currentRunId, "Runs:", jobRuns.map(r => ({ 
+        console.debug("No active run found despite check running. Runs:", jobRuns.map(r => ({ 
             runId: r.runId, 
             startTime: r.startTime, 
             endTime: r.endTime,
             date: r.date 
         })));
         
-        // If check is running but no matching runs found, don't show any as active
-        // This prevents showing old runs as active when a new check just started
         return null;
     };
 
