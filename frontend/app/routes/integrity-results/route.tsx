@@ -32,9 +32,7 @@ function IntegrityCheckButton() {
         let ws: WebSocket;
         let disposed = false;
         function connect() {
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws`;
-            ws = new WebSocket(wsUrl);
+            ws = new WebSocket(window.location.origin.replace(/^http/, 'ws'));
             ws.onmessage = receiveMessage((_, message) => setProgress(message));
             ws.onopen = () => { 
                 setConnected(true); 
@@ -174,15 +172,38 @@ export default function IntegrityResults(props: Route.ComponentProps) {
     const [isCheckRunning, setIsCheckRunning] = useState(false);
     const [lastProgressUpdate, setLastProgressUpdate] = useState<string | null>(null);
 
+    // Function to refresh integrity data
+    const refreshIntegrityData = useCallback(async () => {
+        try {
+            const url = new URL(window.location.href);
+            const backendUrl = process.env.BACKEND_URL || `${url.protocol}//${url.host}`;
+            const apiKey = process.env.FRONTEND_BACKEND_API_KEY || "";
+            
+            const response = await fetch(`${backendUrl}/api/integrity-results`, {
+                method: "GET",
+                headers: {
+                    "Content-Type": "application/json",
+                    "x-api-key": apiKey
+                }
+            });
+            
+            if (response.ok) {
+                const freshData = await response.json();
+                setLiveData(freshData);
+            }
+        } catch (error) {
+            console.error("Failed to refresh integrity data:", error);
+        }
+    }, []);
+
     // WebSocket for real-time updates
     useEffect(() => {
         let ws: WebSocket;
         let disposed = false;
+        let refreshInterval: NodeJS.Timeout | null = null;
         
         function connect() {
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws`;
-            ws = new WebSocket(wsUrl);
+            ws = new WebSocket(window.location.origin.replace(/^http/, 'ws'));
             
             ws.onmessage = receiveMessage((_, message) => {
                 setLastProgressUpdate(message);
@@ -192,13 +213,28 @@ export default function IntegrityResults(props: Route.ComponentProps) {
                     !message.startsWith("complete") && 
                     !message.startsWith("failed") && 
                     !message.startsWith("cancelled");
+                    
                 setIsCheckRunning(isRunning);
                 
-                // Refresh data when check completes
-                if (message && (message.startsWith("complete") || message.startsWith("failed"))) {
+                // When check starts, refresh data to get the new run
+                if (message === "starting") {
+                    setTimeout(() => refreshIntegrityData(), 1000); // Give backend time to create the run
+                    
+                    // Start periodic refresh during check to show new files
+                    refreshInterval = setInterval(() => {
+                        refreshIntegrityData();
+                    }, 5000); // Refresh every 5 seconds during check
+                }
+                
+                // When check completes, stop periodic refresh and do final refresh
+                if (message && (message.startsWith("complete") || message.startsWith("failed") || message.startsWith("cancelled"))) {
+                    if (refreshInterval) {
+                        clearInterval(refreshInterval);
+                        refreshInterval = null;
+                    }
+                    
                     setTimeout(() => {
-                        // Reload the page data to get fresh results
-                        window.location.reload();
+                        refreshIntegrityData();
                     }, 2000);
                 }
             });
@@ -215,8 +251,14 @@ export default function IntegrityResults(props: Route.ComponentProps) {
         }
         
         connect();
-        return () => { disposed = true; ws.close(); }
-    }, []);
+        return () => { 
+            disposed = true; 
+            ws.close(); 
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+            }
+        };
+    }, [refreshIntegrityData]);
 
     // Update live data when props data changes
     useEffect(() => {
@@ -306,13 +348,31 @@ function JobRunsList({ jobRuns, isCheckRunning }: { jobRuns: IntegrityJobRun[]; 
         setExpandedRuns(newExpanded);
     };
 
-    // Determine if this is the most recent run (potentially active)
-    const mostRecentRun = jobRuns.length > 0 ? jobRuns[0] : null;
+    // Find the run that's most likely active (most recent run created within last few minutes)
+    const findActiveRun = () => {
+        if (!isCheckRunning || jobRuns.length === 0) return null;
+        
+        const now = new Date();
+        const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000);
+        
+        // Look for the most recent run that was created recently
+        for (const run of jobRuns) {
+            const runDate = new Date(run.date);
+            if (runDate >= fiveMinutesAgo) {
+                return run;
+            }
+        }
+        
+        // Fallback to most recent run if none found in last 5 minutes
+        return jobRuns[0];
+    };
+
+    const activeRun = findActiveRun();
 
     return (
         <div>
             {jobRuns.map((run, index) => {
-                const isActiveRun = isCheckRunning && index === 0; // Most recent run is active during check
+                const isActiveRun = isCheckRunning && activeRun && run.runId === activeRun.runId;
                 
                 return (
                     <Card key={run.date} className={`mb-3 ${isActiveRun ? 'border-primary' : ''}`}>
