@@ -164,8 +164,6 @@ export async function loader({ request }: Route.LoaderArgs) {
     try {
         const url = new URL(request.url);
         const cookieHeader = request.headers.get("Cookie");
-        console.log(`[LOADER DEBUG] Original request cookie: ${!!cookieHeader}`);
-        console.log(`[LOADER DEBUG] Cookie value: ${cookieHeader?.substring(0, 50)}...`);
         
         // Use frontend proxy instead of direct backend call - construct absolute URL for server-side rendering
         const response = await fetch(`${url.protocol}//${url.host}/api/integrity-results`, {
