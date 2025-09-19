@@ -112,6 +112,33 @@ function formatTimestampForDisplay(dateString: string): string {
     return date.toLocaleString();
 }
 
+// Helper function to calculate and format duration
+function formatDuration(startTime?: string, endTime?: string): string {
+    if (!startTime || !endTime) {
+        return "Unknown";
+    }
+    
+    const start = new Date(startTime);
+    const end = new Date(endTime);
+    const durationMs = end.getTime() - start.getTime();
+    
+    if (durationMs < 0) {
+        return "Invalid";
+    }
+    
+    const seconds = Math.floor(durationMs / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    
+    if (hours > 0) {
+        return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
+    } else if (minutes > 0) {
+        return `${minutes}m ${seconds % 60}s`;
+    } else {
+        return `${seconds}s`;
+    }
+}
+
 type IntegrityFileResult = {
     fileId: string;
     filePath: string;
@@ -127,6 +154,8 @@ type IntegrityFileResult = {
 type IntegrityJobRun = {
     date: string;
     runId?: string;
+    startTime?: string;
+    endTime?: string;
     totalFiles: number;
     corruptFiles: number;
     validFiles: number;
@@ -379,28 +408,60 @@ function JobRunsList({ jobRuns, isCheckRunning }: { jobRuns: IntegrityJobRun[]; 
                         <Card.Header className={isActiveRun ? 'bg-primary bg-opacity-10' : ''}>
                             <div className="d-flex justify-content-between align-items-center">
                                 <div>
-                                    <div className="d-flex align-items-center">
+                                    <div className="d-flex align-items-center mb-1">
                                         {isActiveRun && (
                                             <div className="spinner-border spinner-border-sm me-2" role="status">
                                                 <span className="visually-hidden">Loading...</span>
                                             </div>
                                         )}
-                                        <strong>{formatDateForDisplay(run.date)}</strong>
+                                        <strong className="h6 mb-0">Integrity Check Execution</strong>
                                         {isActiveRun && (
                                             <span className="ms-2 badge bg-primary">
                                                 🔍 Active
                                             </span>
                                         )}
                                     </div>
-                                    {run.runId && (
-                                        <span className="ms-2 text-muted small">
-                                            (Run: {run.runId.substring(0, 8)})
+                                    
+                                    <div className="text-muted small">
+                                        {run.startTime ? (
+                                            <div>
+                                                <strong>Started:</strong> {formatTimestampForDisplay(run.startTime)}
+                                                {run.endTime && (
+                                                    <>
+                                                        {" | "}
+                                                        <strong>Completed:</strong> {formatTimestampForDisplay(run.endTime)}
+                                                        {" | "}
+                                                        <strong>Duration:</strong> {formatDuration(run.startTime, run.endTime)}
+                                                    </>
+                                                )}
+                                                {isActiveRun && !run.endTime && (
+                                                    <>
+                                                        {" | "}
+                                                        <span className="text-primary">
+                                                            <strong>Running...</strong> (Duration: {formatDuration(run.startTime, new Date().toISOString())})
+                                                        </span>
+                                                    </>
+                                                )}
+                                            </div>
+                                        ) : (
+                                            <div>
+                                                <strong>Date:</strong> {formatTimestampForDisplay(run.date)}
+                                            </div>
+                                        )}
+                                        
+                                        {run.runId && (
+                                            <div className="mt-1">
+                                                <strong>Run ID:</strong> {run.runId.substring(0, 8)}...
+                                            </div>
+                                        )}
+                                    </div>
+                                    
+                                    <div className="mt-2">
+                                        <span className="fw-bold">
+                                            {run.totalFiles} files checked
+                                            {isActiveRun && <span className="text-muted"> (updating...)</span>}
                                         </span>
-                                    )}
-                                    <span className="ms-3">
-                                        {run.totalFiles} files checked
-                                        {isActiveRun && <span className="text-muted"> (updating...)</span>}
-                                    </span>
+                                    </div>
                                 </div>
                             <div>
                                 <Badge bg="success" className="me-2">

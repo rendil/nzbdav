@@ -20,7 +20,9 @@ public class IntegrityResultsController(DavDatabaseClient dbClient) : BaseApiCon
                        c.ConfigName.StartsWith("integrity.path.") ||
                        c.ConfigName.StartsWith("integrity.error.") ||
                        c.ConfigName.StartsWith("integrity.action.") ||
-                       c.ConfigName.StartsWith("integrity.run_id."))
+                       c.ConfigName.StartsWith("integrity.run_id.") ||
+                       c.ConfigName.StartsWith("integrity.run_start.") ||
+                       c.ConfigName.StartsWith("integrity.run_end."))
             .ToListAsync(HttpContext.RequestAborted);
 
         // Parse and group the results
@@ -161,15 +163,39 @@ public class IntegrityResultsController(DavDatabaseClient dbClient) : BaseApiCon
             .GroupBy(r => r.RunId)
             .Select(g => {
                 var files = g.OrderByDescending(f => f.LastChecked).ToList();
-                var runDate = files.First().LastChecked; // Use the timestamp of the first file as the run date
+                var runId = g.Key!;
                 
-                Log.Debug("Creating job run for runId {RunId} on {RunDate} with {FileCount} files", 
-                    g.Key, runDate, g.Count());
+                // Get start and end times for this run
+                var startTimeConfig = integrityConfigs
+                    .FirstOrDefault(c => c.ConfigName == $"integrity.run_start.{runId}");
+                var endTimeConfig = integrityConfigs
+                    .FirstOrDefault(c => c.ConfigName == $"integrity.run_end.{runId}");
+                
+                DateTime? startTime = null;
+                DateTime? endTime = null;
+                
+                if (startTimeConfig != null && DateTime.TryParse(startTimeConfig.ConfigValue, out var parsedStart))
+                {
+                    startTime = parsedStart.ToUniversalTime();
+                }
+                
+                if (endTimeConfig != null && DateTime.TryParse(endTimeConfig.ConfigValue, out var parsedEnd))
+                {
+                    endTime = parsedEnd.ToUniversalTime();
+                }
+                
+                // Use start time as the run date, fallback to first file timestamp
+                var runDate = startTime ?? files.First().LastChecked;
+                
+                Log.Debug("Creating job run for runId {RunId} on {RunDate} with {FileCount} files (Start: {StartTime}, End: {EndTime})", 
+                    runId, runDate, g.Count(), startTime, endTime);
                 
                 return new IntegrityJobRun
                 {
-                    Date = runDate, // Use the run timestamp as the date
-                    RunId = g.Key!, // Store the run ID
+                    Date = runDate,
+                    RunId = runId,
+                    StartTime = startTime,
+                    EndTime = endTime,
                     TotalFiles = g.Count(),
                     CorruptFiles = g.Count(f => f.Status == "corrupt"),
                     ValidFiles = g.Count(f => f.Status == "valid"),

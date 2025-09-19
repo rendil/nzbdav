@@ -111,12 +111,19 @@ public class MediaIntegrityService : IDisposable
 
     private async Task PerformIntegrityCheckAsync(CancellationToken ct)
     {
+        // Generate a unique run ID for this execution
+        var runId = Guid.NewGuid().ToString();
+        var startTime = DateTime.UtcNow;
+        
         try
         {
-            // Generate a unique run ID for this execution
-            var runId = Guid.NewGuid().ToString();
             Log.Information("Starting media integrity check with run ID: {RunId}", runId);
             _ = _websocketManager.SendMessage(WebsocketTopic.IntegrityCheckProgress, "starting");
+
+            // Store run start time
+            await using var startDbContext = new DavDatabaseContext();
+            var startDbClient = new DavDatabaseClient(startDbContext);
+            await StoreRunTimestampAsync(startDbClient, runId, "start", startTime, CancellationToken.None);
 
             // Check if library directory is configured (required for arr integration)
             var libraryDir = _configManager.GetLibraryDir();
@@ -238,16 +245,45 @@ public class MediaIntegrityService : IDisposable
             var finalReport = $"complete: {processedFiles}/{totalFiles} checked, {corruptFiles} corrupt files found";
             _ = _websocketManager.SendMessage(WebsocketTopic.IntegrityCheckProgress, finalReport);
             Log.Information("Media integrity check completed: {Report}", finalReport);
+
+            // Store run end time
+            await using var endDbContext = new DavDatabaseContext();
+            var endDbClient = new DavDatabaseClient(endDbContext);
+            await StoreRunTimestampAsync(endDbClient, runId, "end", DateTime.UtcNow, CancellationToken.None);
         }
         catch (OperationCanceledException)
         {
             Log.Information("Media integrity check was cancelled");
             _ = _websocketManager.SendMessage(WebsocketTopic.IntegrityCheckProgress, "cancelled");
+            
+            // Store run end time for cancelled
+            try
+            {
+                await using var cancelDbContext = new DavDatabaseContext();
+                var cancelDbClient = new DavDatabaseClient(cancelDbContext);
+                await StoreRunTimestampAsync(cancelDbClient, runId, "end", DateTime.UtcNow, CancellationToken.None);
+            }
+            catch (Exception storeEx)
+            {
+                Log.Warning(storeEx, "Failed to store end time for cancelled run {RunId}", runId);
+            }
         }
         catch (Exception ex)
         {
             Log.Error(ex, "Error during media integrity check");
             _ = _websocketManager.SendMessage(WebsocketTopic.IntegrityCheckProgress, $"failed: {ex.Message}");
+            
+            // Store run end time for failed
+            try
+            {
+                await using var failDbContext = new DavDatabaseContext();
+                var failDbClient = new DavDatabaseClient(failDbContext);
+                await StoreRunTimestampAsync(failDbClient, runId, "end", DateTime.UtcNow, CancellationToken.None);
+            }
+            catch (Exception storeEx)
+            {
+                Log.Warning(storeEx, "Failed to store end time for failed run {RunId}", runId);
+            }
         }
     }
 
@@ -895,6 +931,30 @@ public class MediaIntegrityService : IDisposable
             {
                 ConfigName = statusConfigName,
                 ConfigValue = isValid ? "valid" : "corrupt"
+            });
+        }
+
+        await dbClient.Ctx.SaveChangesAsync(ct);
+    }
+
+    private async Task StoreRunTimestampAsync(DavDatabaseClient dbClient, string runId, string type, DateTime timestamp, CancellationToken ct)
+    {
+        var configName = $"integrity.run_{type}.{runId}";
+        var configValue = timestamp.ToString("O");
+        
+        var existingConfig = await dbClient.Ctx.ConfigItems
+            .FirstOrDefaultAsync(c => c.ConfigName == configName, ct);
+            
+        if (existingConfig != null)
+        {
+            existingConfig.ConfigValue = configValue;
+        }
+        else
+        {
+            dbClient.Ctx.ConfigItems.Add(new ConfigItem
+            {
+                ConfigName = configName,
+                ConfigValue = configValue
             });
         }
 

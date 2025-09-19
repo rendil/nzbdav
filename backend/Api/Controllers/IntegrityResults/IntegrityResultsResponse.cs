@@ -10,6 +10,8 @@ public class IntegrityJobRun
 {
     public DateTime Date { get; set; }
     public string? RunId { get; set; } // Execution run identifier
+    public DateTime? StartTime { get; set; } // When the run started
+    public DateTime? EndTime { get; set; } // When the run completed
     public int TotalFiles { get; set; }
     public int CorruptFiles { get; set; }
     public int ValidFiles { get; set; }
