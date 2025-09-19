@@ -579,8 +579,7 @@ function JobRunsList({
                                     </div>
                                 )}
                             </div>
-                        </div>
-                    </Card.Header>
+                        </Card.Header>
                     <Collapse in={expandedRuns.has(run.date)}>
                         <Card.Body>
                             <FilesTable files={run.files} />
