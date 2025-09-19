@@ -200,6 +200,7 @@ export default function IntegrityResults(props: Route.ComponentProps) {
     const [liveData, setLiveData] = useState(data);
     const [isCheckRunning, setIsCheckRunning] = useState(false);
     const [lastProgressUpdate, setLastProgressUpdate] = useState<string | null>(null);
+    const [isCancelling, setIsCancelling] = useState(false);
 
     // Function to refresh integrity data
     const refreshIntegrityData = useCallback(async () => {
@@ -225,6 +226,35 @@ export default function IntegrityResults(props: Route.ComponentProps) {
         }
     }, []);
 
+    // Function to cancel integrity check
+    const cancelIntegrityCheck = useCallback(async () => {
+        setIsCancelling(true);
+        try {
+            const url = new URL(window.location.href);
+            const backendUrl = process.env.BACKEND_URL || `${url.protocol}//${url.host}`;
+            const apiKey = process.env.FRONTEND_BACKEND_API_KEY || "";
+            
+            const response = await fetch(`${backendUrl}/api/media-integrity/cancel`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "x-api-key": apiKey
+                }
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                console.log("Cancel result:", result);
+            } else {
+                console.error("Failed to cancel integrity check:", response.statusText);
+            }
+        } catch (error) {
+            console.error("Error cancelling integrity check:", error);
+        } finally {
+            setIsCancelling(false);
+        }
+    }, []);
+
     // WebSocket for real-time updates
     useEffect(() => {
         let ws: WebSocket;
@@ -244,6 +274,11 @@ export default function IntegrityResults(props: Route.ComponentProps) {
                     !message.startsWith("cancelled");
                     
                 setIsCheckRunning(isRunning);
+                
+                // Reset cancelling state when check completes
+                if (!isRunning) {
+                    setIsCancelling(false);
+                }
                 
                 // When check starts, refresh data to get the new run
                 if (message === "starting") {
@@ -322,7 +357,27 @@ export default function IntegrityResults(props: Route.ComponentProps) {
         <div className="container mt-4">
             <div className="d-flex justify-content-between align-items-center mb-4">
                 <h1>Media Integrity Results</h1>
-                <IntegrityCheckButton />
+                <div className="d-flex gap-2">
+                    <IntegrityCheckButton />
+                    {isCheckRunning && (
+                        <Button
+                            variant="outline-danger"
+                            onClick={cancelIntegrityCheck}
+                            disabled={isCancelling}
+                        >
+                            {isCancelling ? (
+                                <>
+                                    <div className="spinner-border spinner-border-sm me-2" role="status">
+                                        <span className="visually-hidden">Cancelling...</span>
+                                    </div>
+                                    Cancelling...
+                                </>
+                            ) : (
+                                <>✕ Cancel Check</>
+                            )}
+                        </Button>
+                    )}
+                </div>
             </div>
             
             

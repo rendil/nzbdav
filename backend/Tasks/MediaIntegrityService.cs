@@ -26,7 +26,7 @@ public class MediaIntegrityService : IDisposable
     private readonly WebsocketManager _websocketManager;
     private readonly ArrManager _arrManager;
     private readonly UsenetStreamingClient _usenetClient;
-    private readonly CancellationTokenSource _cancellationTokenSource;
+    private CancellationTokenSource _cancellationTokenSource;
     private readonly SemaphoreSlim _semaphore = new(1, 1);
     
     private static Task? _runningTask;
@@ -65,6 +65,42 @@ public class MediaIntegrityService : IDisposable
             // otherwise, start the task and return immediately (don't wait for completion).
             _runningTask = Task.Run(() => PerformIntegrityCheckAsync(_cancellationTokenSource.Token));
             return true;
+        }
+        finally
+        {
+            StaticSemaphore.Release();
+        }
+    }
+
+    public async Task<bool> CancelIntegrityCheckAsync()
+    {
+        await StaticSemaphore.WaitAsync();
+        try
+        {
+            // Check if there's an active task
+            if (_runningTask is { IsCompleted: false })
+            {
+                Log.Information("Cancelling active integrity check");
+                _cancellationTokenSource.Cancel();
+                
+                // Wait a short time for graceful cancellation
+                try
+                {
+                    await _runningTask.WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                catch (OperationCanceledException)
+                {
+                    // Expected when cancellation succeeds
+                }
+                
+                // Create a new cancellation token source for future operations
+                _cancellationTokenSource?.Dispose();
+                _cancellationTokenSource = new CancellationTokenSource();
+                
+                return true;
+            }
+            
+            return false; // No active task to cancel
         }
         finally
         {
