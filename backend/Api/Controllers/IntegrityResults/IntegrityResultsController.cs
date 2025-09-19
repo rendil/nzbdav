@@ -15,7 +15,8 @@ public class IntegrityResultsController(DavDatabaseClient dbClient) : BaseApiCon
         // Get all integrity check related config items
         var integrityConfigs = await dbClient.Ctx.ConfigItems
             .Where(c => c.ConfigName.StartsWith("integrity.last_check.") || 
-                       c.ConfigName.StartsWith("integrity.status."))
+                       c.ConfigName.StartsWith("integrity.status.") ||
+                       c.ConfigName.StartsWith("integrity.path."))
             .ToListAsync(HttpContext.RequestAborted);
 
         // Parse and group the results
@@ -45,13 +46,20 @@ public class IntegrityResultsController(DavDatabaseClient dbClient) : BaseApiCon
                 continue;
             }
 
-            // Find corresponding status config
+            // Find corresponding status config and path config
             var statusConfigName = isLibraryFile 
                 ? $"integrity.status.library.{fileId}"
                 : $"integrity.status.{fileId}";
             
+            var pathConfigName = isLibraryFile 
+                ? $"integrity.path.library.{fileId}"
+                : null; // Internal DAV items don't use path config
+            
             var statusConfig = integrityConfigs
                 .FirstOrDefault(c => c.ConfigName == statusConfigName);
+            
+            var pathConfig = pathConfigName != null ? integrityConfigs
+                .FirstOrDefault(c => c.ConfigName == pathConfigName) : null;
 
             // Get file info
             string filePath = "Unknown";
@@ -70,10 +78,18 @@ public class IntegrityResultsController(DavDatabaseClient dbClient) : BaseApiCon
             }
             else if (isLibraryFile)
             {
-                // Library file - we'd need to reverse the hash to get the path
-                // For now, just use the hash as identifier
-                filePath = $"Library file (hash: {fileId})";
-                fileName = $"Library file {fileId}";
+                // Library file - use stored path if available
+                if (pathConfig != null && !string.IsNullOrEmpty(pathConfig.ConfigValue))
+                {
+                    filePath = pathConfig.ConfigValue;
+                    fileName = Path.GetFileName(pathConfig.ConfigValue);
+                }
+                else
+                {
+                    // Fallback for legacy entries without stored paths
+                    filePath = $"Library file (hash: {fileId})";
+                    fileName = $"Library file {fileId}";
+                }
             }
 
             var result = new IntegrityFileResult

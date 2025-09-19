@@ -458,6 +458,24 @@ public class MediaIntegrityService : IDisposable
             });
         }
 
+        // Store the original file path for display purposes
+        var pathConfigName = $"integrity.path.library.{fileHash}";
+        var pathConfig = await dbClient.Ctx.ConfigItems
+            .FirstOrDefaultAsync(c => c.ConfigName == pathConfigName, ct);
+            
+        if (pathConfig != null)
+        {
+            pathConfig.ConfigValue = filePath;
+        }
+        else
+        {
+            dbClient.Ctx.ConfigItems.Add(new ConfigItem
+            {
+                ConfigName = pathConfigName,
+                ConfigValue = filePath
+            });
+        }
+
         await dbClient.Ctx.SaveChangesAsync(ct);
     }
 
