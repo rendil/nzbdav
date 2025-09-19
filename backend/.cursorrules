@@ -1,0 +1,344 @@
+== NzbDAV Backend Architecture Rules ==
+
+**Core Technology Stack**
+
+- Framework & Tools
+
+- .NET 9 - Latest .NET runtime and framework
+- ASP.NET Core - Web framework with built-in DI container
+- Entity Framework Core - ORM with SQLite database
+- NWebDav.Server - WebDAV protocol implementation
+- Serilog - Structured logging framework
+- FFMpegCore - Media file processing
+- SharpCompress - Archive handling (RAR/ZIP)
+- Usenet library - Usenet protocol client
+
+Project Structure
+
+- Single executable project (OutputType: Exe)
+- Nullable reference types enabled
+- Implicit usings enabled
+- Target Framework: net9.0
+- File Structure & Organization
+
+Directory Architecture
+
+Api/
+├── Controllers/ # REST API endpoints
+│ ├── BaseApiController.cs # Base controller with auth
+│ ├── BaseApiResponse.cs # Standard response format
+│ └── FeatureName/ # Feature-specific controllers
+│ ├── FeatureController.cs
+│ ├── FeatureRequest.cs
+│ └── FeatureResponse.cs
+├── SabControllers/ # SABnzbd-compatible API
+Clients/ # External service clients
+├── Connections/ # Connection pooling utilities
+Config/ # Configuration management
+Database/ # Entity Framework context & models
+├── Models/ # Entity models
+├── Migrations/ # EF Core migrations
+├── Interceptors/ # Database interceptors
+Exceptions/ # Custom exception types
+Extensions/ # Extension methods
+Middlewares/ # ASP.NET Core middleware
+Queue/ # Background processing
+├── FileProcessors/ # File type processors
+├── FileAggregators/ # File collection logic
+├── DeobfuscationSteps/ # File name deobfuscation
+Streams/ # Custom stream implementations
+Tasks/ # Background services
+Utils/ # Utility classes
+WebDav/ # WebDAV implementation
+├── Base/ # WebDAV base classes
+├── Requests/ # WebDAV request handlers
+Websocket/ # WebSocket management
+
+Naming Conventions
+
+- Namespaces: PascalCase following folder structure - NzbWebDAV.Api.Controllers
+- Classes: PascalCase - MediaIntegrityService
+- Files: PascalCase matching class name - MediaIntegrityService.cs
+- Interfaces: IPascalCase - INntpClient
+- Enums: PascalCase - ItemType
+- Constants: PascalCase - IdPrefixLength
+
+**Dependency Injection & Service Lifetimes**
+
+Service Registration Patterns
+
+- Singleton: Stateful services, managers, configurations
+  builder.Services.AddSingleton<ConfigManager>();
+  builder.Services.AddSingleton<WebsocketManager>();
+  builder.Services.AddSingleton<UsenetStreamingClient>();
+- Scoped: Database contexts, request-scoped services
+  builder.Services.AddScoped<DavDatabaseContext>();
+  builder.Services.AddScoped<DavDatabaseClient>();
+
+Constructor Injection
+
+- Use primary constructors: public class Service(Dependency dep)
+- Inject interfaces when available: INntpClient not NntpClient
+- Avoid service locator pattern
+
+**Database Architecture**
+
+Entity Framework Patterns
+
+- Database-First approach: Models reflect database schema
+- Migration-based: Use EF Core migrations for schema changes
+- SQLite database: Single file at /config/db.sqlite
+- Connection per request: Scoped DavDatabaseContext
+
+Model Conventions
+
+- Primary keys: Use Guid for entities with public IDs
+- Navigation properties: Include [JsonIgnore] for serialization
+- Required properties: Use = null! pattern for EF Core
+- Static instances: Define well-known entities as static readonly
+
+Database Access
+
+- Repository pattern: Use DavDatabaseClient wrapper
+- Async operations: Always use async methods with CancellationToken
+- Using statements: Always dispose contexts: await using var context
+
+**API Controller Architecture**
+
+Base Controller Pattern
+[ApiController]
+[Route("api/feature-name")]
+public class FeatureController(Dependencies deps) : BaseApiController
+{
+protected override async Task<IActionResult> HandleRequest()
+{
+// Implementation
+}
+}
+
+Request/Response Pattern
+
+- Each endpoint gets: Controller.cs, Request.cs, Response.cs
+- Request parsing: Use new FeatureRequest(HttpContext)
+- Response format: Inherit from BaseApiResponse
+- Error handling: Automatic via BaseApiController
+
+Authentication & Authorization
+
+- API Key authentication: Via FRONTEND_BACKEND_API_KEY environment variable
+- WebDAV basic auth: Username/password from configuration
+- Override auth requirement: Set RequiresAuthentication = false
+
+**WebSocket Architecture**
+
+Topic-Based Messaging
+
+public static readonly WebsocketTopic TopicName = new("short", TopicType.State);
+
+Topic Types
+
+- State topics: Send current state on connect + updates
+- Event topics: Only send new events, no state persistence
+- Message Broadcasting
+  \_ = websocketManager.SendMessage(WebsocketTopic.TopicName, "message");
+
+WebSocket Client Lifecycle
+
+- Authentication required: API key on connection
+- Auto-reconnection: Handled by frontend WebSocket client
+- State persistence: State topics automatically send last message
+
+**Background Services & Tasks**
+
+Hosted Service Pattern
+
+- Inherit from: Background service or implement IHostedService
+- Singleton lifetime: Register as singleton
+- Cancellation support: Use CancellationToken throughout
+- Error handling: Catch exceptions, log, and continue
+
+Queue Processing
+
+- Producer/Consumer: Use QueueManager for work items
+- File processors: Implement specific file type handlers
+- Debouncing: Use DebounceUtil for progress updates
+
+**Configuration Management**
+
+ConfigManager Pattern
+
+- Centralized configuration: All config through ConfigManager
+- Database-backed: Config stored in ConfigItems table
+- Type-safe getters: Create specific methods for each config
+- Event notifications: Subscribe to OnConfigChanged
+
+Configuration Methods
+
+public bool IsFeatureEnabled()
+{
+return GetConfigValue("feature.enabled")?.ToLowerInvariant() == "true";
+}
+
+public int GetFeatureTimeout()
+{
+if (int.TryParse(GetConfigValue("feature.timeout"), out var timeout))
+return Math.Max(1, timeout);
+return 30; // Default value
+}
+
+**Logging Patterns**
+
+Serilog Configuration
+
+- Structured logging: Use named parameters in log messages
+- Log levels: Configure via LOG_LEVEL environment variable
+- Console output: ANSI color theme for development
+
+Logging Best Practices
+
+- Log.Information("Processing file {FilePath} for user {UserId}", filePath, userId);
+- Log.Warning("Failed to process {FilePath}: {ErrorMessage}", filePath, ex.Message);
+- Log.Error(ex, "Unexpected error processing {FilePath}", filePath);
+
+Performance Logging
+
+- Use LogEventLevel.Debug for detailed tracing
+- Use LogEventLevel.Information for business events
+- Use LogEventLevel.Warning for recoverable errors
+- Use LogEventLevel.Error for exceptions
+
+**Stream & File Processing**
+
+Custom Stream Classes
+
+- Purpose-built streams: Inherit from Stream for specific use cases
+- Disposal pattern: Implement IDisposable properly
+- Async operations: Support ReadAsync, WriteAsync with cancellation
+- Buffering: Consider memory usage for large files
+
+File Processing Pipeline
+
+- File Detection: Determine file type (NZB, RAR, media)
+- Validation: Check file integrity and completeness
+- Processing: Extract, decompress, or stream content
+- Cleanup: Dispose resources and temporary files
+
+**Error Handling & Exceptions**
+
+Custom Exception Types
+
+- Domain-specific: Create exceptions for business logic errors
+- Inheritance: Inherit from appropriate base exceptions
+- Serializable: Support serialization for distributed scenarios
+
+Exception Middleware
+
+- Global handler: ExceptionMiddleware catches unhandled exceptions
+- Response format: Convert to standard JSON error responses
+- Logging: Log exceptions with full context
+
+Error Recovery
+
+- Retry logic: Use exponential backoff for transient failures
+- Circuit breaker: Implement for external service calls
+- Graceful degradation: Continue operation when possible
+
+**Extension Methods**
+
+Extension Patterns
+
+- Static classes: Use static classes for extension methods
+- Namespace alignment: Match namespace with extended type
+- Null checking: Check for null in extension methods
+- Performance: Avoid allocations in hot paths
+
+Common Extensions
+
+public static class StringExtensions
+{
+public static bool IsAny(this string value, params string[] acceptedValues)
+{
+return acceptedValues.Any(acceptedValue => value == acceptedValue);
+}
+}
+
+**External Client Integration**
+
+HTTP Client Pattern
+
+- Base client class: Common functionality in ArrClient
+- Derived clients: RadarrClient, SonarrClient with specific logic
+- Connection management: Use HttpClient with proper disposal
+- Retry policies: Implement retry for transient failures
+
+Usenet Client Architecture
+
+- Connection pooling: Manage multiple NNTP connections
+- Thread safety: Use thread-safe wrappers
+- Caching: Cache frequently accessed data
+- Authentication: Handle credentials securely
+
+**Performance Considerations**
+
+Memory Management
+
+- Dispose pattern: Always dispose database contexts and streams
+- Async operations: Use async/await throughout
+- Cancellation: Support cancellation tokens in long operations
+- Streaming: Process large files as streams, not in memory
+
+Caching Strategies
+
+- In-memory caching: For configuration and frequently accessed data
+- Connection pooling: Reuse expensive connections
+- Lazy loading: Load data only when needed
+
+Database Optimization
+
+- Query optimization: Use appropriate indexes and queries
+- Batch operations: Process multiple items together
+- Connection management: Use scoped contexts appropriately
+
+**Security Patterns**
+
+Authentication
+
+- API keys: Use environment variables for secrets
+- Password hashing: Use secure hashing with salt
+- Session management: Implement proper session timeout
+
+Authorization
+
+- Role-based: Check permissions in controllers
+- Resource access: Validate user access to specific resources
+- API security: Validate all inputs and sanitize outputs
+
+**Testing Considerations**
+
+Testability Patterns
+
+- Dependency injection: Makes unit testing easier
+- Interface segregation: Create testable abstractions
+- Pure functions: Separate business logic from side effects
+
+Integration Testing
+
+- Database testing: Use in-memory or test databases
+- External services: Mock HTTP clients and external dependencies
+- End-to-end: Test complete workflows
+
+**Deployment & Environment**
+
+Environment Variables
+
+- CONFIG_PATH: Configuration and database location (/config)
+- LOG_LEVEL: Logging verbosity (Debug, Information, Warning, Error)
+- FRONTEND_BACKEND_API_KEY: API authentication key
+- MAX_REQUEST_BODY_SIZE: Maximum request size in bytes
+
+Container Considerations
+
+- Health checks: Implement /health endpoint
+- Signal handling: Graceful shutdown via SIGTERM
+- File permissions: Handle Docker volume permissions
+- Process isolation: Single responsibility per container
