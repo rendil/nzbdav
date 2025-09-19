@@ -413,17 +413,6 @@ export default function IntegrityResults(props: Route.ComponentProps) {
         );
     }
 
-    if (!liveData) {
-        return (
-            <div className="container mt-4">
-                <Alert variant="info">
-                    <Alert.Heading>No Integrity Check Data</Alert.Heading>
-                    <p>No integrity checks have been run yet. Enable integrity checking in Settings to start monitoring your media files.</p>
-                </Alert>
-            </div>
-        );
-    }
-
     return (
         <div className="container mt-4">
             <div className="d-flex justify-content-between align-items-center mb-4">
@@ -431,7 +420,7 @@ export default function IntegrityResults(props: Route.ComponentProps) {
                 <IntegrityCheckButton />
             </div>
             
-            {/* Search and Filter Controls */}
+            {/* Search and Filter Controls - Always show */}
             <div className="row mb-4">
                 <div className="col-md-8">
                     <div className="input-group">
@@ -485,7 +474,12 @@ export default function IntegrityResults(props: Route.ComponentProps) {
                 </div>
             </div>
             
-            {filteredData?.jobRuns.length === 0 ? (
+            {!liveData || !liveData.jobRuns ? (
+                <Alert variant="info">
+                    <Alert.Heading>No Integrity Check Data</Alert.Heading>
+                    <p>No integrity checks have been run yet. Enable integrity checking in Settings to start monitoring your media files.</p>
+                </Alert>
+            ) : filteredData?.jobRuns.length === 0 ? (
                 <Alert variant="info">
                     <Alert.Heading>No Results Found</Alert.Heading>
                     <p>
