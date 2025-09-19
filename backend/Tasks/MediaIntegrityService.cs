@@ -186,6 +186,24 @@ public class MediaIntegrityService : IDisposable
                         await HandleCorruptFileAsync(dbClient, checkItem.DavItem, filePath, ct);
                     }
 
+                    // Auto-unmonitor successful files if enabled
+                    if (!isCorrupt && _configManager.IsAutoUnmonitorEnabled() && checkItem.LibraryFilePath != null)
+                    {
+                        try
+                        {
+                            Log.Debug("Attempting to auto-unmonitor successfully verified file: {FilePath}", checkItem.LibraryFilePath);
+                            var unmonitorSuccess = await _arrManager.UnmonitorFileFromArrAsync(checkItem.LibraryFilePath, ct);
+                            if (unmonitorSuccess)
+                            {
+                                Log.Information("Auto-unmonitored file after successful integrity check: {FilePath}", checkItem.LibraryFilePath);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Log.Warning(ex, "Failed to auto-unmonitor file after integrity check: {FilePath}", checkItem.LibraryFilePath);
+                        }
+                    }
+
                     // Update integrity check timestamp
                     if (checkItem.LibraryFilePath != null)
                     {

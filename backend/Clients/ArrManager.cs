@@ -144,6 +144,87 @@ public class ArrManager : IDisposable
         }
     }
 
+    public async Task<bool> UnmonitorFileFromArrAsync(string filePath, CancellationToken ct = default)
+    {
+        await _semaphore.WaitAsync(ct);
+        try
+        {
+            var anySuccess = false;
+            var contentType = DetectContentType(filePath);
+
+            Log.Debug("Attempting to unmonitor content type '{ContentType}' for file: {FilePath}", contentType, filePath);
+
+            if (contentType == ContentType.Movie || contentType == ContentType.Unknown)
+            {
+                // Try Radarr instances (for movies and unknown content)
+                foreach (var radarrClient in _radarrClients)
+                {
+                    try
+                    {
+                        var success = await radarrClient.UnmonitorMovieAsync(filePath, ct);
+                        if (success)
+                        {
+                            Log.Information("Successfully unmonitored movie for file '{FilePath}' via Radarr instance '{InstanceName}'", 
+                                filePath, radarrClient.InstanceName);
+                            anySuccess = true;
+                            // Don't break here - the file might exist in multiple instances
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warning(ex, "Failed to unmonitor movie for file '{FilePath}' via Radarr instance '{InstanceName}'", 
+                            filePath, radarrClient.InstanceName);
+                    }
+                }
+            }
+
+            if (contentType == ContentType.TvShow || contentType == ContentType.Unknown)
+            {
+                // Try Sonarr instances (for TV shows and unknown content)
+                foreach (var sonarrClient in _sonarrClients)
+                {
+                    try
+                    {
+                        var success = await sonarrClient.UnmonitorSeriesAsync(filePath, ct);
+                        if (success)
+                        {
+                            Log.Information("Successfully unmonitored series for file '{FilePath}' via Sonarr instance '{InstanceName}'", 
+                                filePath, sonarrClient.InstanceName);
+                            anySuccess = true;
+                            // Don't break here - the file might exist in multiple instances
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        var logLevel = contentType == ContentType.TvShow ? "Warning" : "Debug";
+                        if (logLevel == "Warning")
+                        {
+                            Log.Warning(ex, "Failed to unmonitor series for file '{FilePath}' via Sonarr instance '{InstanceName}'", 
+                                filePath, sonarrClient.InstanceName);
+                        }
+                        else
+                        {
+                            Log.Debug(ex, "Failed to unmonitor series for file '{FilePath}' via Sonarr instance '{InstanceName}' - likely a movie file", 
+                                filePath, sonarrClient.InstanceName);
+                        }
+                    }
+                }
+            }
+
+            if (!anySuccess)
+            {
+                Log.Debug("File '{FilePath}' was not found for unmonitoring in any configured {ServiceTypes} instances", 
+                    filePath, GetServiceTypesString(contentType));
+            }
+
+            return anySuccess;
+        }
+        finally
+        {
+            _semaphore.Release();
+        }
+    }
+
     public async Task<bool> TestAllConnectionsAsync(CancellationToken ct = default)
     {
         var allSuccessful = true;

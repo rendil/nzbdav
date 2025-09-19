@@ -216,6 +216,22 @@ export function IntegritySettings({ config, setNewConfig }: IntegritySettingsPro
                             the system will delete the file directly from the filesystem. Leave disabled for safety.
                         </Form.Text>
                     </Form.Group>
+                    
+                    <hr />
+                    
+                    <Form.Group>
+                        <Form.Check
+                            type="checkbox"
+                            id="auto-unmonitor-checkbox"
+                            label="Auto-unmonitor after successful integrity checks"
+                            checked={config["integrity.auto_unmonitor"] === "true"}
+                            onChange={e => setNewConfig({ ...config, "integrity.auto_unmonitor": e.target.checked ? "true" : "false" })}
+                        />
+                        <Form.Text muted>
+                            When enabled, movies and TV series will be automatically unmonitored in Radarr/Sonarr after passing integrity checks. 
+                            This prevents re-downloading of verified files. Only applies when using Radarr/Sonarr integration.
+                        </Form.Text>
+                    </Form.Group>
                 </>
             )}
 
@@ -287,5 +303,6 @@ export function isIntegritySettingsUpdated(config: Record<string, string>, newCo
         || config["integrity.max_files_per_run"] !== newConfig["integrity.max_files_per_run"]
         || config["integrity.corrupt_file_action"] !== newConfig["integrity.corrupt_file_action"]
         || config["integrity.direct_deletion_fallback"] !== newConfig["integrity.direct_deletion_fallback"]
+        || config["integrity.auto_unmonitor"] !== newConfig["integrity.auto_unmonitor"]
         || config["integrity.mp4_deep_scan"] !== newConfig["integrity.mp4_deep_scan"];
 }

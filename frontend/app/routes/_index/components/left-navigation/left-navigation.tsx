@@ -5,10 +5,11 @@ import type React from "react";
 import { LiveUsenetConnections } from "../live-usenet-connections/live-usenet-connections";
 
 export type LeftNavigationProps = {
-    version?: string
+    version?: string;
+    integrityEnabled?: boolean;
 }
 
-export function LeftNavigation({ version }: LeftNavigationProps) {
+export function LeftNavigation({ version, integrityEnabled }: LeftNavigationProps) {
     return (
         <div className={styles.container}>
             <Item target="/queue">
@@ -19,10 +20,12 @@ export function LeftNavigation({ version }: LeftNavigationProps) {
                 <div className={styles["explore-icon"]} />
                 <div className={styles.title}>Dav Explore</div>
             </Item>
-            <Item target="/integrity-results">
-                <div className={styles["integrity-icon"]} />
-                <div className={styles.title}>Integrity Results</div>
-            </Item>
+            {integrityEnabled && (
+                <Item target="/integrity-results">
+                    <div className={styles["integrity-icon"]} />
+                    <div className={styles.title}>Integrity Results</div>
+                </Item>
+            )}
             <Item target="/settings">
                 <div className={styles["settings-icon"]} />
                 <div className={styles.title}>Settings</div>

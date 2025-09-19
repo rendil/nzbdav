@@ -8,13 +8,13 @@ namespace NzbWebDAV.Api.Controllers.LibraryDiagnostic;
 [Route("api/library-diagnostic")]
 public class LibraryDiagnosticController(ConfigManager configManager) : BaseApiController
 {
-    protected override async Task<IActionResult> HandleRequest()
+    protected override Task<IActionResult> HandleRequest()
     {
         var libraryDir = configManager.GetLibraryDir();
         
         if (string.IsNullOrEmpty(libraryDir))
         {
-            return Ok(new { Error = "Library directory not configured" });
+            return Task.FromResult<IActionResult>(Ok(new { Error = "Library directory not configured" }));
         }
 
         var response = new
@@ -25,7 +25,7 @@ public class LibraryDiagnosticController(ConfigManager configManager) : BaseApiC
             FileAnalysis = AnalyzeDirectory(libraryDir)
         };
 
-        return Ok(response);
+        return Task.FromResult<IActionResult>(Ok(response));
     }
 
     private static object GetDirectoryInfo(string path)

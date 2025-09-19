@@ -180,6 +180,79 @@ public class SonarrClient : ArrClient
         }
     }
 
+    public async Task<bool> UnmonitorSeriesAsync(string filePath, CancellationToken ct = default)
+    {
+        try
+        {
+            // First, find the episode file
+            var episodeFiles = await GetEpisodeFilesAsync(ct);
+            var targetEpisodeFile = FindEpisodeFileByPath(episodeFiles.ToArray(), filePath);
+            
+            if (targetEpisodeFile == null)
+            {
+                Log.Warning("Could not find episode file with path '{FilePath}' in Sonarr instance '{InstanceName}' for unmonitoring", 
+                    filePath, _instanceName);
+                return false;
+            }
+
+            // Get the series for this episode file
+            var series = await GetAsync<SonarrSeries[]>("/api/v3/series", ct);
+            if (series == null)
+            {
+                Log.Warning("Failed to retrieve series from Sonarr instance '{InstanceName}' for unmonitoring", _instanceName);
+                return false;
+            }
+
+            var targetSeries = series.FirstOrDefault(s => s.Id == targetEpisodeFile.SeriesId);
+            if (targetSeries == null)
+            {
+                Log.Warning("Could not find series (ID: {SeriesId}) for episode file '{FilePath}' in Sonarr instance '{InstanceName}' for unmonitoring", 
+                    targetEpisodeFile.SeriesId, filePath, _instanceName);
+                return false;
+            }
+
+            // Only unmonitor if currently monitored
+            if (!targetSeries.Monitored)
+            {
+                Log.Debug("Series '{Title}' is already unmonitored in Sonarr instance '{InstanceName}'", 
+                    targetSeries.Title, _instanceName);
+                return true; // Already unmonitored, consider this success
+            }
+
+            // Update the series to unmonitor it
+            var updatePayload = new
+            {
+                id = targetSeries.Id,
+                monitored = false,
+                // Include other required fields to avoid API errors
+                title = targetSeries.Title,
+                titleSlug = targetSeries.TitleSlug,
+                tvdbId = targetSeries.TvdbId,
+                year = targetSeries.Year,
+                path = targetSeries.Path,
+                seasons = targetSeries.Seasons
+            };
+
+            var result = await PutAsync<object>($"/api/v3/series/{targetSeries.Id}", updatePayload, ct);
+            if (result != null)
+            {
+                Log.Information("Successfully unmonitored series '{Title}' (ID: {SeriesId}) in Sonarr instance '{InstanceName}' after integrity check", 
+                    targetSeries.Title, targetSeries.Id, _instanceName);
+                return true;
+            }
+
+            Log.Warning("Failed to unmonitor series '{Title}' (ID: {SeriesId}) in Sonarr instance '{InstanceName}' - no response", 
+                targetSeries.Title, targetSeries.Id, _instanceName);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Error unmonitoring series for file '{FilePath}' in Sonarr instance '{InstanceName}'", 
+                filePath, _instanceName);
+            return false;
+        }
+    }
+
     public async Task<List<SonarrEpisodeFile>> GetEpisodeFilesAsync(CancellationToken ct = default)
     {
         var episodeFiles = await GetAsync<SonarrEpisodeFile[]>("/api/v3/episodefile", ct);

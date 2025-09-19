@@ -79,6 +79,33 @@ public abstract class ArrClient : IDisposable
         }
     }
 
+    protected async Task<T?> PutAsync<T>(string endpoint, object? body = null, CancellationToken ct = default)
+    {
+        try
+        {
+            var url = $"{_baseUrl}{endpoint}";
+            var json = body != null ? JsonSerializer.Serialize(body, WebJsonOptions) : "{}";
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            
+            var response = await _httpClient.PutAsync(url, content, ct);
+            
+            if (!response.IsSuccessStatusCode)
+            {
+                Log.Warning("Failed to PUT {Url}: {StatusCode} {ReasonPhrase}", 
+                    url, response.StatusCode, response.ReasonPhrase);
+                return default;
+            }
+
+            var responseContent = await response.Content.ReadAsStringAsync(ct);
+            return JsonSerializer.Deserialize<T>(responseContent, WebJsonOptions);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Error making PUT request to {InstanceName}: {Endpoint}", _instanceName, endpoint);
+            return default;
+        }
+    }
+
     protected async Task<bool> DeleteAsync(string endpoint, CancellationToken ct = default)
     {
         try

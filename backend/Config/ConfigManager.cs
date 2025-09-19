@@ -186,6 +186,13 @@ public class ConfigManager
         return false; // Default to disabled for performance
     }
 
+    public bool IsAutoUnmonitorEnabled()
+    {
+        if (bool.TryParse(GetConfigValue("integrity.auto_unmonitor"), out var enabled))
+            return enabled;
+        return false; // Default to disabled for safety
+    }
+
     public bool IsFuseEnabled()
     {
         var configValue = StringUtil.EmptyToNull(GetConfigValue("fuse.enabled"));

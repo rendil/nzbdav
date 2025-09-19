@@ -37,7 +37,7 @@ public class IntegrityDiagnosticController(ConfigManager configManager, DavDatab
         // Check if library directory exists
         var libraryDirExists = !string.IsNullOrEmpty(libraryDir) && Directory.Exists(libraryDir);
         var libraryFileCount = 0;
-        if (libraryDirExists)
+        if (libraryDirExists && !string.IsNullOrEmpty(libraryDir))
         {
             try
             {
@@ -46,6 +46,7 @@ public class IntegrityDiagnosticController(ConfigManager configManager, DavDatab
             }
             catch (Exception ex)
             {
+                Console.WriteLine($"Error accessing library directory: {ex.Message}");
                 libraryFileCount = -1; // Error accessing directory
             }
         }
@@ -63,12 +64,12 @@ public class IntegrityDiagnosticController(ConfigManager configManager, DavDatab
 
         // Calculate eligible files for next check
         var eligibleFileCount = 0;
-        if (libraryDirExists && libraryFileCount > 0)
+        if (libraryDirExists && libraryFileCount > 0 && !string.IsNullOrEmpty(libraryDir))
         {
             try
             {
                 var cutoffTime = DateTime.Now.AddDays(-intervalDays);
-                var allFiles = Directory.EnumerateFiles(libraryDir!, "*", SearchOption.AllDirectories)
+                var allFiles = Directory.EnumerateFiles(libraryDir, "*", SearchOption.AllDirectories)
                     .Where(file => IsMediaFile(Path.GetExtension(file).ToLowerInvariant()));
 
                 foreach (var filePath in allFiles)
@@ -88,8 +89,9 @@ public class IntegrityDiagnosticController(ConfigManager configManager, DavDatab
                     }
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                Console.WriteLine($"Error calculating eligible file count: {ex.Message}");
                 eligibleFileCount = -1; // Error calculating
             }
         }
