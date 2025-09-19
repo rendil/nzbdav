@@ -10,6 +10,8 @@ type IntegrityFileResult = {
     isLibraryFile: boolean;
     lastChecked: string;
     status: string;
+    errorMessage?: string;
+    actionTaken?: string;
 };
 
 type IntegrityJobRun = {
@@ -173,6 +175,8 @@ function FilesTable({ files }: { files: IntegrityFileResult[] }) {
                     <th>File Path</th>
                     <th>Last Checked</th>
                     <th>Type</th>
+                    <th>Error</th>
+                    <th>Action Taken</th>
                 </tr>
             </thead>
             <tbody>
@@ -192,6 +196,28 @@ function FilesTable({ files }: { files: IntegrityFileResult[] }) {
                             <Badge bg={file.isLibraryFile ? "primary" : "secondary"}>
                                 {file.isLibraryFile ? "Library" : "Internal"}
                             </Badge>
+                        </td>
+                        <td>
+                            {file.errorMessage ? (
+                                <span className="text-danger" title={file.errorMessage}>
+                                    {file.errorMessage.length > 50 
+                                        ? `${file.errorMessage.substring(0, 50)}...` 
+                                        : file.errorMessage}
+                                </span>
+                            ) : (
+                                <span className="text-muted">-</span>
+                            )}
+                        </td>
+                        <td>
+                            {file.actionTaken ? (
+                                <span className="text-info" title={file.actionTaken}>
+                                    {file.actionTaken.length > 30 
+                                        ? `${file.actionTaken.substring(0, 30)}...` 
+                                        : file.actionTaken}
+                                </span>
+                            ) : (
+                                <span className="text-muted">-</span>
+                            )}
                         </td>
                     </tr>
                 ))}

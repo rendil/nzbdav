@@ -23,4 +23,6 @@ public class IntegrityFileResult
     public bool IsLibraryFile { get; set; }
     public DateTime LastChecked { get; set; }
     public string Status { get; set; } = null!; // "valid", "corrupt", "unknown"
+    public string? ErrorMessage { get; set; } // Error details for failed checks
+    public string? ActionTaken { get; set; } // Action taken for corrupt files
 }

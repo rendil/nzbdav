@@ -17,7 +17,9 @@ public class IntegrityResultsController(DavDatabaseClient dbClient) : BaseApiCon
         var integrityConfigs = await dbClient.Ctx.ConfigItems
             .Where(c => c.ConfigName.StartsWith("integrity.last_check.") || 
                        c.ConfigName.StartsWith("integrity.status.") ||
-                       c.ConfigName.StartsWith("integrity.path."))
+                       c.ConfigName.StartsWith("integrity.path.") ||
+                       c.ConfigName.StartsWith("integrity.error.") ||
+                       c.ConfigName.StartsWith("integrity.action."))
             .ToListAsync(HttpContext.RequestAborted);
 
         // Parse and group the results
@@ -47,7 +49,7 @@ public class IntegrityResultsController(DavDatabaseClient dbClient) : BaseApiCon
                 continue;
             }
 
-            // Find corresponding status config and path config
+            // Find corresponding status, path, error, and action configs
             var statusConfigName = isLibraryFile 
                 ? $"integrity.status.library.{fileId}"
                 : $"integrity.status.{fileId}";
@@ -55,12 +57,26 @@ public class IntegrityResultsController(DavDatabaseClient dbClient) : BaseApiCon
             var pathConfigName = isLibraryFile 
                 ? $"integrity.path.library.{fileId}"
                 : null; // Internal DAV items don't use path config
+                
+            var errorConfigName = isLibraryFile 
+                ? $"integrity.error.library.{fileId}"
+                : $"integrity.error.{fileId}";
+                
+            var actionConfigName = isLibraryFile 
+                ? $"integrity.action.library.{fileId}"
+                : $"integrity.action.{fileId}";
             
             var statusConfig = integrityConfigs
                 .FirstOrDefault(c => c.ConfigName == statusConfigName);
             
             var pathConfig = pathConfigName != null ? integrityConfigs
                 .FirstOrDefault(c => c.ConfigName == pathConfigName) : null;
+                
+            var errorConfig = integrityConfigs
+                .FirstOrDefault(c => c.ConfigName == errorConfigName);
+                
+            var actionConfig = integrityConfigs
+                .FirstOrDefault(c => c.ConfigName == actionConfigName);
 
             // Get file info
             string filePath = "Unknown";
@@ -116,7 +132,9 @@ public class IntegrityResultsController(DavDatabaseClient dbClient) : BaseApiCon
                 FileName = fileName,
                 IsLibraryFile = isLibraryFile,
                 LastChecked = parsedLastChecked,
-                Status = statusConfig?.ConfigValue ?? "unknown"
+                Status = statusConfig?.ConfigValue ?? "unknown",
+                ErrorMessage = errorConfig?.ConfigValue,
+                ActionTaken = actionConfig?.ConfigValue
             };
 
             fileResults.Add(result);

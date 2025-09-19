@@ -173,17 +173,39 @@ public class MediaIntegrityService : IDisposable
 
                 try
                 {
-                    var isCorrupt = await CheckFileIntegrityAsync(checkItem.DavItem, ct);
+                    var (isCorrupt, errorMessage) = await CheckFileIntegrityAsync(checkItem.DavItem, ct);
                     
                     if (isCorrupt)
                     {
                         corruptFiles++;
-                        Log.Warning("Corrupt media file detected: {FilePath}", checkItem.DavItem.Path);
+                        Log.Warning("Corrupt media file detected: {FilePath} - {Error}", checkItem.DavItem.Path, errorMessage);
                         
                         // Use library file path for arr integration, or symlink path for internal files
                         var filePath = checkItem.LibraryFilePath ?? 
                             DatabaseStoreSymlinkFile.GetTargetPath(checkItem.DavItem, _configManager.GetRcloneMountDir());
-                        await HandleCorruptFileAsync(dbClient, checkItem.DavItem, filePath, ct);
+                        var actionTaken = await HandleCorruptFileAsync(dbClient, checkItem.DavItem, filePath, ct);
+                        
+                        // Store error details and action taken
+                        if (checkItem.LibraryFilePath != null)
+                        {
+                            await StoreIntegrityCheckDetailsAsync(dbClient, checkItem.LibraryFilePath, false, errorMessage, actionTaken, ct);
+                        }
+                        else
+                        {
+                            await StoreIntegrityCheckDetailsAsync(dbClient, checkItem.DavItem, false, errorMessage, actionTaken, ct);
+                        }
+                    }
+                    else
+                    {
+                        // Store successful check details
+                        if (checkItem.LibraryFilePath != null)
+                        {
+                            await StoreIntegrityCheckDetailsAsync(dbClient, checkItem.LibraryFilePath, true, null, null, ct);
+                        }
+                        else
+                        {
+                            await StoreIntegrityCheckDetailsAsync(dbClient, checkItem.DavItem, true, null, null, ct);
+                        }
                     }
 
                     // Auto-unmonitor successful files if enabled
@@ -204,11 +226,7 @@ public class MediaIntegrityService : IDisposable
                         }
                     }
 
-                    // Update integrity check timestamp
-                    if (checkItem.LibraryFilePath != null)
-                    {
-                        await UpdateLastIntegrityCheckForLibraryFileAsync(dbClient, checkItem.LibraryFilePath, !isCorrupt, ct);
-                    }
+                    // Note: Integrity check details are now stored in the StoreIntegrityCheckDetailsAsync calls above
                 }
                 catch (Exception ex)
                 {
@@ -497,14 +515,14 @@ public class MediaIntegrityService : IDisposable
         await dbClient.Ctx.SaveChangesAsync(ct);
     }
 
-    private async Task<bool> CheckFileIntegrityAsync(DavItem davItem, CancellationToken ct)
+    private async Task<(bool isCorrupt, string? errorMessage)> CheckFileIntegrityAsync(DavItem davItem, CancellationToken ct)
     {
         var fileExtension = Path.GetExtension(davItem.Name).ToLowerInvariant();
         
         // Check if it's a media file type we can verify
         if (!IsMediaFile(fileExtension))
         {
-            return false; // Not a media file, consider it valid
+            return (false, null); // Not a media file, consider it valid
         }
 
         try
@@ -520,7 +538,7 @@ public class MediaIntegrityService : IDisposable
                 if (nzbFile == null)
                 {
                     Log.Warning("Could not find NZB file data for {FilePath} (ID: {Id})", davItem.Path, davItem.Id);
-                    return true; // Consider missing NZB data as corrupt
+                    return (true, "NZB file data not found in database"); // Consider missing NZB data as corrupt
                 }
                 stream = _usenetClient.GetFileStream(nzbFile.SegmentIds, davItem.FileSize!.Value, _configManager.GetConnectionsPerStream());
             }
@@ -530,14 +548,14 @@ public class MediaIntegrityService : IDisposable
                 if (rarFile == null)
                 {
                     Log.Warning("Could not find RAR file data for {FilePath} (ID: {Id})", davItem.Path, davItem.Id);
-                    return true; // Consider missing RAR data as corrupt
+                    return (true, "RAR file data not found in database"); // Consider missing RAR data as corrupt
                 }
                 stream = new RarFileStream(rarFile.RarParts, _usenetClient, _configManager.GetConnectionsPerStream());
             }
             else
             {
                 Log.Debug("Skipping integrity check for unsupported file type: {FilePath} (Type: {ItemType})", davItem.Path, davItem.Type);
-                return false; // Consider unsupported types as valid
+                return (false, null); // Consider unsupported types as valid
             }
             
             // Use FFMpegCore to analyze the entire stream for media integrity
@@ -552,13 +570,13 @@ public class MediaIntegrityService : IDisposable
             if (isCorrupt)
             {
                 Log.Warning("File integrity check FAILED for {FilePath}: Invalid or corrupt media content", davItem.Path);
+                return (true, "FFmpeg validation failed - invalid or corrupt media content");
             }
             else
             {
                 Log.Information("File integrity check PASSED for {FilePath}", davItem.Path);
+                return (false, null);
             }
-            
-            return isCorrupt;
         }
         catch (UsenetArticleNotFoundException ex)
         {
@@ -566,7 +584,7 @@ public class MediaIntegrityService : IDisposable
             
             // Missing articles mean the file is definitely corrupt/incomplete
             // This is similar to how the download process handles missing articles
-            return true; // Mark as corrupt
+            return (true, $"Missing usenet articles: {ex.Message}"); // Mark as corrupt
         }
         catch (Exception ex)
         {
@@ -579,11 +597,11 @@ public class MediaIntegrityService : IDisposable
                 Log.Error("ffprobe not found - please ensure FFmpeg is installed. File integrity cannot be verified: {FilePath}", davItem.Path);
                 // Return true (corrupt) to indicate there's an issue that needs attention
                 // This prevents silent failures where users think files are checked but they're not
-                return true;
+                return (true, "FFmpeg/ffprobe not found - please ensure FFmpeg is installed");
             }
             
             // For other errors, assume file is ok but log the issue
-            return false;
+            return (false, $"Error during integrity check: {ex.Message}");
         }
     }
 
@@ -600,7 +618,7 @@ public class MediaIntegrityService : IDisposable
     }
 
 
-    private async Task HandleCorruptFileAsync(DavDatabaseClient dbClient, DavItem? davItem, string filePath, CancellationToken ct)
+    private async Task<string> HandleCorruptFileAsync(DavDatabaseClient dbClient, DavItem? davItem, string filePath, CancellationToken ct)
     {
         var action = _configManager.GetCorruptFileAction();
         
@@ -621,12 +639,13 @@ public class MediaIntegrityService : IDisposable
                         dbClient.Ctx.Items.Remove(davItem);
                         await dbClient.Ctx.SaveChangesAsync(ct);
                     }
+                    return "File deleted successfully";
                 }
                 catch (Exception ex)
                 {
                     Log.Error(ex, "Error deleting corrupt file: {FilePath}", filePath);
+                    return $"Failed to delete file: {ex.Message}";
                 }
-                break;
                 
             case "delete_via_arr":
                 try
@@ -643,6 +662,7 @@ public class MediaIntegrityService : IDisposable
                             dbClient.Ctx.Items.Remove(davItem);
                             await dbClient.Ctx.SaveChangesAsync(ct);
                         }
+                        return "File deleted via Radarr/Sonarr successfully";
                     }
                     else
                     {
@@ -665,19 +685,21 @@ public class MediaIntegrityService : IDisposable
                                 dbClient.Ctx.Items.Remove(davItem);
                                 await dbClient.Ctx.SaveChangesAsync(ct);
                             }
+                            return "Failed to delete via Radarr/Sonarr, used direct deletion fallback";
                         }
                         else
                         {
                             Log.Information("Direct deletion fallback is disabled, leaving corrupt file in place: {FilePath}", filePath);
                             Log.Warning("Corrupt file was not deleted by Radarr/Sonarr and direct deletion fallback is disabled. File remains: {FilePath}", filePath);
+                            return "Failed to delete via Radarr/Sonarr, direct deletion fallback disabled";
                         }
                     }
                 }
                 catch (Exception ex)
                 {
                     Log.Error(ex, "Error deleting corrupt file via Radarr/Sonarr: {FilePath}", filePath);
+                    return $"Error during Radarr/Sonarr deletion: {ex.Message}";
                 }
-                break;
                 
             case "quarantine":
                 try
@@ -690,19 +712,117 @@ public class MediaIntegrityService : IDisposable
                     {
                         File.Move(filePath, quarantinePath);
                         Log.Information("Moved corrupt file to quarantine: {FilePath} -> {QuarantinePath}", filePath, quarantinePath);
+                        return $"File moved to quarantine: {quarantinePath}";
                     }
+                    return "File not found for quarantine";
                 }
                 catch (Exception ex)
                 {
                     Log.Error(ex, "Error quarantining corrupt file: {FilePath}", filePath);
+                    return $"Failed to quarantine file: {ex.Message}";
                 }
-                break;
                 
             case "log":
             default:
                 // Just log the issue (already done above)
-                break;
+                return "Logged corrupt file (no action taken)";
         }
+    }
+
+    private async Task StoreIntegrityCheckDetailsAsync(DavDatabaseClient dbClient, string filePath, bool isValid, string? errorMessage, string? actionTaken, CancellationToken ct)
+    {
+        var fileHash = GetFilePathHash(filePath);
+        await StoreIntegrityCheckDetailsForHashAsync(dbClient, fileHash, isValid, errorMessage, actionTaken, ct);
+    }
+
+    private async Task StoreIntegrityCheckDetailsAsync(DavDatabaseClient dbClient, DavItem davItem, bool isValid, string? errorMessage, string? actionTaken, CancellationToken ct)
+    {
+        await StoreIntegrityCheckDetailsForHashAsync(dbClient, davItem.Id.ToString(), isValid, errorMessage, actionTaken, ct);
+    }
+
+    private async Task StoreIntegrityCheckDetailsForHashAsync(DavDatabaseClient dbClient, string identifier, bool isValid, string? errorMessage, string? actionTaken, CancellationToken ct)
+    {
+        var now = DateTime.Now.ToString("O");
+        
+        // Determine if this is a library file or internal DavItem
+        bool isLibraryFile = !Guid.TryParse(identifier, out _);
+        string prefix = isLibraryFile ? "library." : "";
+        
+        // Store last check timestamp
+        var lastCheckConfigName = $"integrity.last_check.{prefix}{identifier}";
+        var lastCheckConfig = await dbClient.Ctx.ConfigItems
+            .FirstOrDefaultAsync(c => c.ConfigName == lastCheckConfigName, ct);
+        if (lastCheckConfig != null)
+        {
+            lastCheckConfig.ConfigValue = now;
+        }
+        else
+        {
+            dbClient.Ctx.ConfigItems.Add(new ConfigItem
+            {
+                ConfigName = lastCheckConfigName,
+                ConfigValue = now
+            });
+        }
+
+        // Store status
+        var statusConfigName = $"integrity.status.{prefix}{identifier}";
+        var statusConfig = await dbClient.Ctx.ConfigItems
+            .FirstOrDefaultAsync(c => c.ConfigName == statusConfigName, ct);
+        if (statusConfig != null)
+        {
+            statusConfig.ConfigValue = isValid ? "valid" : "corrupt";
+        }
+        else
+        {
+            dbClient.Ctx.ConfigItems.Add(new ConfigItem
+            {
+                ConfigName = statusConfigName,
+                ConfigValue = isValid ? "valid" : "corrupt"
+            });
+        }
+
+        // Store error message if present
+        if (!string.IsNullOrEmpty(errorMessage))
+        {
+            var errorConfigName = $"integrity.error.{prefix}{identifier}";
+            var errorConfig = await dbClient.Ctx.ConfigItems
+                .FirstOrDefaultAsync(c => c.ConfigName == errorConfigName, ct);
+            if (errorConfig != null)
+            {
+                errorConfig.ConfigValue = errorMessage;
+            }
+            else
+            {
+                dbClient.Ctx.ConfigItems.Add(new ConfigItem
+                {
+                    ConfigName = errorConfigName,
+                    ConfigValue = errorMessage
+                });
+            }
+        }
+
+        // Store action taken if present
+        if (!string.IsNullOrEmpty(actionTaken))
+        {
+            var actionConfigName = $"integrity.action.{prefix}{identifier}";
+            var actionConfig = await dbClient.Ctx.ConfigItems
+                .FirstOrDefaultAsync(c => c.ConfigName == actionConfigName, ct);
+            if (actionConfig != null)
+            {
+                actionConfig.ConfigValue = actionTaken;
+            }
+            else
+            {
+                dbClient.Ctx.ConfigItems.Add(new ConfigItem
+                {
+                    ConfigName = actionConfigName,
+                    ConfigValue = actionTaken
+                });
+            }
+        }
+
+        await dbClient.Ctx.SaveChangesAsync(ct);
     }
 
     private async Task UpdateLastIntegrityCheckAsync(DavDatabaseClient dbClient, DavItem davItem, bool isValid, CancellationToken ct)
