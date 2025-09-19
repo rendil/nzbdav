@@ -1,6 +1,6 @@
 import type { Route } from "./+types/route";
 import styles from "./route.module.css";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Card, Table, Badge, Alert, Button, Collapse } from "react-bootstrap";
 import { receiveMessage } from "../../utils/websocket-util";
 
@@ -195,6 +195,11 @@ export default function IntegrityResults(props: Route.ComponentProps) {
     const [lastProgressUpdate, setLastProgressUpdate] = useState<string | null>(null);
     const [isCancelling, setIsCancelling] = useState(false);
     const [currentRunId, setCurrentRunId] = useState<string | null>(null);
+    
+    // Search and filter state
+    const [searchQuery, setSearchQuery] = useState("");
+    const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
+    const [timeFilter, setTimeFilter] = useState("< 24 hours");
 
     // Function to refresh integrity data
     const refreshIntegrityData = useCallback(async () => {
@@ -328,6 +333,75 @@ export default function IntegrityResults(props: Route.ComponentProps) {
         setLiveData(data);
     }, [data]);
 
+    // Debounce search query
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setDebouncedSearchQuery(searchQuery);
+        }, 300); // 300ms delay
+
+        return () => clearTimeout(timer);
+    }, [searchQuery]);
+
+    // Helper function to get time filter cutoff
+    const getTimeFilterCutoff = useCallback(() => {
+        const now = new Date();
+        switch (timeFilter) {
+            case "< 2 hours":
+                return new Date(now.getTime() - 2 * 60 * 60 * 1000);
+            case "< 24 hours":
+                return new Date(now.getTime() - 24 * 60 * 60 * 1000);
+            case "< 3 days":
+                return new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000);
+            case "< 7 days":
+                return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            default:
+                return new Date(now.getTime() - 24 * 60 * 60 * 1000);
+        }
+    }, [timeFilter]);
+
+    // Filter and search logic
+    const filteredData = useMemo(() => {
+        if (!liveData || !liveData.jobRuns) return liveData;
+
+        const cutoffTime = getTimeFilterCutoff();
+        
+        // Filter job runs by time
+        const timeFilteredRuns = liveData.jobRuns.filter(run => {
+            const runTime = run.startTime ? new Date(run.startTime) : new Date(run.date);
+            return runTime >= cutoffTime;
+        });
+
+        // If no search query, return time-filtered runs
+        if (!debouncedSearchQuery.trim()) {
+            return {
+                ...liveData,
+                jobRuns: timeFilteredRuns
+            };
+        }
+
+        // Apply search filter to files within each run
+        const searchLower = debouncedSearchQuery.toLowerCase();
+        const searchFilteredRuns = timeFilteredRuns.map(run => {
+            const filteredFiles = run.files.filter(file => 
+                file.fileName.toLowerCase().includes(searchLower) ||
+                file.filePath.toLowerCase().includes(searchLower)
+            );
+            
+            return {
+                ...run,
+                files: filteredFiles,
+                totalFiles: filteredFiles.length,
+                validFiles: filteredFiles.filter(f => f.status === 'valid').length,
+                corruptFiles: filteredFiles.filter(f => f.status === 'corrupt').length
+            };
+        }).filter(run => run.files.length > 0); // Only show runs that have matching files
+
+        return {
+            ...liveData,
+            jobRuns: searchFilteredRuns
+        };
+    }, [liveData, debouncedSearchQuery, timeFilter, getTimeFilterCutoff]);
+
     if (error) {
         return (
             <div className="container mt-4">
@@ -357,17 +431,99 @@ export default function IntegrityResults(props: Route.ComponentProps) {
                 <IntegrityCheckButton />
             </div>
             
+            {/* Search and Filter Controls */}
+            <div className="row mb-4">
+                <div className="col-md-8">
+                    <div className="input-group">
+                        <span className="input-group-text">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                                <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85zm-5.442 1.5a5.5 5.5 0 1 1 0-11 5.5 5.5 0 0 1 0 11"/>
+                            </svg>
+                        </span>
+                        <input
+                            type="text"
+                            className="form-control"
+                            placeholder="Search by file name or path..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Escape') {
+                                    setSearchQuery("");
+                                }
+                            }}
+                        />
+                        {searchQuery !== debouncedSearchQuery && (
+                            <span className="input-group-text">
+                                <div className="spinner-border spinner-border-sm" role="status" style={{ width: "12px", height: "12px" }}>
+                                    <span className="visually-hidden">Searching...</span>
+                                </div>
+                            </span>
+                        )}
+                        {searchQuery && (
+                            <button
+                                className="btn btn-outline-secondary"
+                                type="button"
+                                onClick={() => setSearchQuery("")}
+                                title="Clear search"
+                            >
+                                ✕
+                            </button>
+                        )}
+                    </div>
+                </div>
+                <div className="col-md-4">
+                    <select
+                        className="form-select"
+                        value={timeFilter}
+                        onChange={(e) => setTimeFilter(e.target.value)}
+                    >
+                        <option value="< 2 hours">Last 2 hours</option>
+                        <option value="< 24 hours">Last 24 hours</option>
+                        <option value="< 3 days">Last 3 days</option>
+                        <option value="< 7 days">Last 7 days</option>
+                    </select>
+                </div>
+            </div>
             
-            {liveData.jobRuns.length === 0 ? (
+            {filteredData?.jobRuns.length === 0 ? (
                 <Alert variant="info">
-                    <Alert.Heading>No Integrity Checks Found</Alert.Heading>
-                    <p>No integrity checks have been completed yet. Check your settings to enable integrity checking.</p>
+                    <Alert.Heading>No Results Found</Alert.Heading>
+                    <p>
+                        {debouncedSearchQuery ? 
+                            `No files matching "${debouncedSearchQuery}" found in the selected time range.` :
+                            `No integrity checks found in the selected time range (${timeFilter}).`
+                        }
+                    </p>
+                    {(debouncedSearchQuery || timeFilter !== "< 24 hours") && (
+                        <div className="mt-2">
+                            <button 
+                                className="btn btn-outline-primary btn-sm me-2"
+                                onClick={() => setSearchQuery("")}
+                            >
+                                Clear Search
+                            </button>
+                            <button 
+                                className="btn btn-outline-primary btn-sm"
+                                onClick={() => setTimeFilter("< 7 days")}
+                            >
+                                Show More Results
+                            </button>
+                        </div>
+                    )}
                 </Alert>
             ) : (
                 <div className="mb-4">
-                    <h3>Integrity Check Results by Execution</h3>
+                    <div className="d-flex justify-content-between align-items-center mb-3">
+                        <h3>Integrity Check Results by Execution</h3>
+                        {(debouncedSearchQuery || filteredData?.jobRuns.length !== liveData?.jobRuns.length) && (
+                            <small className="text-muted">
+                                Showing {filteredData?.jobRuns.length} of {liveData?.jobRuns.length} executions
+                                {debouncedSearchQuery && ` matching "${debouncedSearchQuery}"`}
+                            </small>
+                        )}
+                    </div>
                     <JobRunsList 
-                        jobRuns={liveData.jobRuns} 
+                        jobRuns={filteredData.jobRuns} 
                         isCheckRunning={isCheckRunning} 
                         cancelIntegrityCheck={cancelIntegrityCheck}
                         isCancelling={isCancelling}
