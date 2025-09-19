@@ -160,16 +160,12 @@ type IntegrityResultsData = {
     allFiles: IntegrityFileResult[];
 };
 
-export async function loader({ request }: Route.LoaderArgs) {
+export async function loader() {
     try {
-        const url = new URL(request.url);
-        
-        // Use frontend proxy instead of direct backend call
-        const response = await fetch(`${url.protocol}//${url.host}/api/integrity-results`, {
+        const response = await fetch("/api/integrity-results", {
             method: "GET",
             headers: {
-                "Content-Type": "application/json",
-                "Cookie": request.headers.get("Cookie") || ""
+                "Content-Type": "application/json;charset=UTF-8"
             }
         });
 
@@ -198,11 +194,10 @@ export default function IntegrityResults(props: Route.ComponentProps) {
     // Function to refresh integrity data
     const refreshIntegrityData = useCallback(async () => {
         try {
-            // Use frontend proxy instead of direct backend call
             const response = await fetch("/api/integrity-results", {
                 method: "GET",
                 headers: {
-                    "Content-Type": "application/json"
+                    "Content-Type": "application/json;charset=UTF-8"
                 }
             });
             
@@ -219,11 +214,10 @@ export default function IntegrityResults(props: Route.ComponentProps) {
     const cancelIntegrityCheck = useCallback(async () => {
         setIsCancelling(true);
         try {
-            // Use frontend proxy instead of direct backend call
             const response = await fetch("/api/media-integrity/cancel", {
                 method: "POST",
                 headers: {
-                    "Content-Type": "application/json"
+                    "Content-Type": "application/json;charset=UTF-8"
                 }
             });
             
@@ -258,7 +252,7 @@ export default function IntegrityResults(props: Route.ComponentProps) {
                 setLastProgressUpdate(messageText);
                 
                 // Determine if check is running based on progress message
-                const isRunning = messageText && 
+                const isRunning = !!messageText && 
                     !messageText.startsWith("complete") && 
                     !messageText.startsWith("failed") && 
                     !messageText.startsWith("cancelled");
