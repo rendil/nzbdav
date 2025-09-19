@@ -3,6 +3,20 @@ import styles from "./route.module.css";
 import { useState, useEffect } from "react";
 import { Card, Table, Badge, Alert, Button, Collapse } from "react-bootstrap";
 
+// Helper function to format UTC dates for local display
+function formatDateForDisplay(dateString: string): string {
+    // Backend sends UTC dates, convert to local time for display
+    const date = new Date(dateString);
+    return date.toLocaleDateString();
+}
+
+// Helper function to format UTC timestamps for local display  
+function formatTimestampForDisplay(dateString: string): string {
+    // Backend sends UTC timestamps, convert to local time for display
+    const date = new Date(dateString);
+    return date.toLocaleString();
+}
+
 type IntegrityFileResult = {
     fileId: string;
     filePath: string;
@@ -12,10 +26,12 @@ type IntegrityFileResult = {
     status: string;
     errorMessage?: string;
     actionTaken?: string;
+    runId?: string;
 };
 
 type IntegrityJobRun = {
     date: string;
+    runId?: string;
     totalFiles: number;
     corruptFiles: number;
     validFiles: number;
@@ -91,7 +107,7 @@ export default function IntegrityResults(props: Route.ComponentProps) {
                 </Alert>
             ) : (
                 <div className="mb-4">
-                    <h3>Integrity Check Results by Date</h3>
+                    <h3>Integrity Check Results by Execution</h3>
                     <JobRunsList jobRuns={data.jobRuns} />
                 </div>
             )}
@@ -119,7 +135,12 @@ function JobRunsList({ jobRuns }: { jobRuns: IntegrityJobRun[] }) {
                     <Card.Header>
                         <div className="d-flex justify-content-between align-items-center">
                             <div>
-                                <strong>{new Date(run.date).toLocaleDateString()}</strong>
+                                <strong>{formatDateForDisplay(run.date)}</strong>
+                                {run.runId && (
+                                    <span className="ms-2 text-muted small">
+                                        (Run: {run.runId.substring(0, 8)})
+                                    </span>
+                                )}
                                 <span className="ms-3">
                                     {run.totalFiles} files checked
                                 </span>
@@ -182,7 +203,7 @@ function FilesTable({ files }: { files: IntegrityFileResult[] }) {
                             <code className="text-muted">{file.filePath}</code>
                         </td>
                         <td>
-                            {new Date(file.lastChecked).toLocaleString()}
+                            {formatTimestampForDisplay(file.lastChecked)}
                         </td>
                         <td>
                             {file.errorMessage ? (

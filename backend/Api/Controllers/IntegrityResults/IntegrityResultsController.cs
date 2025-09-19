@@ -19,7 +19,8 @@ public class IntegrityResultsController(DavDatabaseClient dbClient) : BaseApiCon
                        c.ConfigName.StartsWith("integrity.status.") ||
                        c.ConfigName.StartsWith("integrity.path.") ||
                        c.ConfigName.StartsWith("integrity.error.") ||
-                       c.ConfigName.StartsWith("integrity.action."))
+                       c.ConfigName.StartsWith("integrity.action.") ||
+                       c.ConfigName.StartsWith("integrity.run_id."))
             .ToListAsync(HttpContext.RequestAborted);
 
         // Parse and group the results
@@ -49,7 +50,7 @@ public class IntegrityResultsController(DavDatabaseClient dbClient) : BaseApiCon
                 continue;
             }
 
-            // Find corresponding status, path, error, and action configs
+            // Find corresponding status, path, error, action, and run_id configs
             var statusConfigName = isLibraryFile 
                 ? $"integrity.status.library.{fileId}"
                 : $"integrity.status.{fileId}";
@@ -65,6 +66,10 @@ public class IntegrityResultsController(DavDatabaseClient dbClient) : BaseApiCon
             var actionConfigName = isLibraryFile 
                 ? $"integrity.action.library.{fileId}"
                 : $"integrity.action.{fileId}";
+                
+            var runIdConfigName = isLibraryFile 
+                ? $"integrity.run_id.library.{fileId}"
+                : $"integrity.run_id.{fileId}";
             
             var statusConfig = integrityConfigs
                 .FirstOrDefault(c => c.ConfigName == statusConfigName);
@@ -77,6 +82,9 @@ public class IntegrityResultsController(DavDatabaseClient dbClient) : BaseApiCon
                 
             var actionConfig = integrityConfigs
                 .FirstOrDefault(c => c.ConfigName == actionConfigName);
+                
+            var runIdConfig = integrityConfigs
+                .FirstOrDefault(c => c.ConfigName == runIdConfigName);
 
             // Get file info
             string filePath = "Unknown";
@@ -109,16 +117,16 @@ public class IntegrityResultsController(DavDatabaseClient dbClient) : BaseApiCon
                 }
             }
 
-            // Parse the timestamp more carefully and ensure local time for consistent grouping
+            // Parse the timestamp (keep as UTC, let frontend handle local display)
             DateTime parsedLastChecked = DateTime.MinValue;
             if (!string.IsNullOrEmpty(lastCheckConfig.ConfigValue))
             {
                 if (DateTime.TryParse(lastCheckConfig.ConfigValue, out var tempLastChecked))
                 {
-                    // Convert to local time to ensure consistent date grouping
-                    parsedLastChecked = tempLastChecked.ToLocalTime();
-                    Log.Debug("Parsed timestamp for {FileId}: {OriginalValue} -> {ParsedValue} (Local Date: {DatePart})", 
-                        fileId, lastCheckConfig.ConfigValue, parsedLastChecked, parsedLastChecked.Date);
+                    // Keep as UTC - frontend will handle local display
+                    parsedLastChecked = tempLastChecked.ToUniversalTime();
+                    Log.Debug("Parsed timestamp for {FileId}: {OriginalValue} -> {ParsedValue} (UTC)", 
+                        fileId, lastCheckConfig.ConfigValue, parsedLastChecked);
                 }
                 else
                 {
@@ -135,7 +143,8 @@ public class IntegrityResultsController(DavDatabaseClient dbClient) : BaseApiCon
                 LastChecked = parsedLastChecked,
                 Status = statusConfig?.ConfigValue ?? "unknown",
                 ErrorMessage = errorConfig?.ConfigValue,
-                ActionTaken = actionConfig?.ConfigValue
+                ActionTaken = actionConfig?.ConfigValue,
+                RunId = runIdConfig?.ConfigValue
             };
 
             fileResults.Add(result);
@@ -146,37 +155,28 @@ public class IntegrityResultsController(DavDatabaseClient dbClient) : BaseApiCon
             .OrderByDescending(r => r.LastChecked)
             .ToList();
 
-        // Group by date for job runs (use local date to match what users see)
+        // Group by execution run ID
         var jobRuns = fileResults
-            .Where(r => r.LastChecked != DateTime.MinValue)
-            .GroupBy(r => {
-                // Ensure we're grouping by local date only (strip time component)
-                var localDate = r.LastChecked.ToLocalTime().Date;
-                Log.Debug("Grouping file {FileName} with timestamp {LastChecked} under date {GroupDate}", 
-                    r.FileName, r.LastChecked, localDate);
-                return localDate;
-            })
+            .Where(r => r.LastChecked != DateTime.MinValue && !string.IsNullOrEmpty(r.RunId))
+            .GroupBy(r => r.RunId)
             .Select(g => {
-                Log.Debug("Creating job run for date {Date} with {FileCount} files", g.Key, g.Count());
                 var files = g.OrderByDescending(f => f.LastChecked).ToList();
+                var runDate = files.First().LastChecked; // Use the timestamp of the first file as the run date
                 
-                // Log first few files to debug the grouping issue
-                for (int i = 0; i < Math.Min(3, files.Count); i++)
-                {
-                    Log.Debug("  File {Index}: {FileName} checked at {LastChecked} (local: {LocalTime}) grouped under {GroupDate}", 
-                        i + 1, files[i].FileName, files[i].LastChecked, files[i].LastChecked.ToLocalTime(), g.Key);
-                }
+                Log.Debug("Creating job run for runId {RunId} on {RunDate} with {FileCount} files", 
+                    g.Key, runDate, g.Count());
                 
                 return new IntegrityJobRun
                 {
-                    Date = g.Key,
+                    Date = runDate, // Use the run timestamp as the date
+                    RunId = g.Key!, // Store the run ID
                     TotalFiles = g.Count(),
                     CorruptFiles = g.Count(f => f.Status == "corrupt"),
                     ValidFiles = g.Count(f => f.Status == "valid"),
                     Files = files
                 };
             })
-            .OrderByDescending(j => j.Date)
+            .OrderByDescending(j => j.Date) // Order by most recent run first
             .ToList();
 
         var response = new IntegrityResultsResponse

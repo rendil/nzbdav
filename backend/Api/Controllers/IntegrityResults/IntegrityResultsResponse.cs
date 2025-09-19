@@ -9,6 +9,7 @@ public class IntegrityResultsResponse
 public class IntegrityJobRun
 {
     public DateTime Date { get; set; }
+    public string? RunId { get; set; } // Execution run identifier
     public int TotalFiles { get; set; }
     public int CorruptFiles { get; set; }
     public int ValidFiles { get; set; }
@@ -25,4 +26,5 @@ public class IntegrityFileResult
     public string Status { get; set; } = null!; // "valid", "corrupt", "unknown"
     public string? ErrorMessage { get; set; } // Error details for failed checks
     public string? ActionTaken { get; set; } // Action taken for corrupt files
+    public string? RunId { get; set; } // Execution run identifier
 }

@@ -118,7 +118,9 @@ public class MediaIntegrityService : IDisposable
     {
         try
         {
-            Log.Information("Starting media integrity check");
+            // Generate a unique run ID for this execution
+            var runId = Guid.NewGuid().ToString();
+            Log.Information("Starting media integrity check with run ID: {RunId}", runId);
             _ = _websocketManager.SendMessage(WebsocketTopic.IntegrityCheckProgress, "starting");
 
             // Check if library directory is configured (required for arr integration)
@@ -188,11 +190,11 @@ public class MediaIntegrityService : IDisposable
                         // Store error details and action taken
                         if (checkItem.LibraryFilePath != null)
                         {
-                            await StoreIntegrityCheckDetailsAsync(dbClient, checkItem.LibraryFilePath, false, errorMessage, actionTaken, ct);
+                            await StoreIntegrityCheckDetailsAsync(dbClient, checkItem.LibraryFilePath, false, errorMessage, actionTaken, runId, ct);
                         }
                         else
                         {
-                            await StoreIntegrityCheckDetailsAsync(dbClient, checkItem.DavItem, false, errorMessage, actionTaken, ct);
+                            await StoreIntegrityCheckDetailsAsync(dbClient, checkItem.DavItem, false, errorMessage, actionTaken, runId, ct);
                         }
                     }
                     else
@@ -200,11 +202,11 @@ public class MediaIntegrityService : IDisposable
                         // Store successful check details
                         if (checkItem.LibraryFilePath != null)
                         {
-                            await StoreIntegrityCheckDetailsAsync(dbClient, checkItem.LibraryFilePath, true, null, null, ct);
+                            await StoreIntegrityCheckDetailsAsync(dbClient, checkItem.LibraryFilePath, true, null, null, runId, ct);
                         }
                         else
                         {
-                            await StoreIntegrityCheckDetailsAsync(dbClient, checkItem.DavItem, true, null, null, ct);
+                            await StoreIntegrityCheckDetailsAsync(dbClient, checkItem.DavItem, true, null, null, runId, ct);
                         }
                     }
 
@@ -458,7 +460,7 @@ public class MediaIntegrityService : IDisposable
     {
         var fileHash = GetFilePathHash(filePath);
         var configName = $"integrity.last_check.library.{fileHash}";
-        var configValue = DateTime.Now.ToString("O");
+        var configValue = DateTime.UtcNow.ToString("O");
         
         var existingConfig = await dbClient.Ctx.ConfigItems
             .FirstOrDefaultAsync(c => c.ConfigName == configName, ct);
@@ -729,20 +731,20 @@ public class MediaIntegrityService : IDisposable
         }
     }
 
-    private async Task StoreIntegrityCheckDetailsAsync(DavDatabaseClient dbClient, string filePath, bool isValid, string? errorMessage, string? actionTaken, CancellationToken ct)
+    private async Task StoreIntegrityCheckDetailsAsync(DavDatabaseClient dbClient, string filePath, bool isValid, string? errorMessage, string? actionTaken, string runId, CancellationToken ct)
     {
         var fileHash = GetFilePathHash(filePath);
-        await StoreIntegrityCheckDetailsForHashAsync(dbClient, fileHash, isValid, errorMessage, actionTaken, ct);
+        await StoreIntegrityCheckDetailsForHashAsync(dbClient, fileHash, isValid, errorMessage, actionTaken, runId, ct);
     }
 
-    private async Task StoreIntegrityCheckDetailsAsync(DavDatabaseClient dbClient, DavItem davItem, bool isValid, string? errorMessage, string? actionTaken, CancellationToken ct)
+    private async Task StoreIntegrityCheckDetailsAsync(DavDatabaseClient dbClient, DavItem davItem, bool isValid, string? errorMessage, string? actionTaken, string runId, CancellationToken ct)
     {
-        await StoreIntegrityCheckDetailsForHashAsync(dbClient, davItem.Id.ToString(), isValid, errorMessage, actionTaken, ct);
+        await StoreIntegrityCheckDetailsForHashAsync(dbClient, davItem.Id.ToString(), isValid, errorMessage, actionTaken, runId, ct);
     }
 
-    private async Task StoreIntegrityCheckDetailsForHashAsync(DavDatabaseClient dbClient, string identifier, bool isValid, string? errorMessage, string? actionTaken, CancellationToken ct)
+    private async Task StoreIntegrityCheckDetailsForHashAsync(DavDatabaseClient dbClient, string identifier, bool isValid, string? errorMessage, string? actionTaken, string runId, CancellationToken ct)
     {
-        var now = DateTime.Now.ToString("O");
+        var now = DateTime.UtcNow.ToString("O");
         
         // Determine if this is a library file or internal DavItem
         bool isLibraryFile = !Guid.TryParse(identifier, out _);
@@ -822,13 +824,30 @@ public class MediaIntegrityService : IDisposable
             }
         }
 
+        // Store run ID for grouping by execution
+        var runIdConfigName = $"integrity.run_id.{prefix}{identifier}";
+        var runIdConfig = await dbClient.Ctx.ConfigItems
+            .FirstOrDefaultAsync(c => c.ConfigName == runIdConfigName, ct);
+        if (runIdConfig != null)
+        {
+            runIdConfig.ConfigValue = runId;
+        }
+        else
+        {
+            dbClient.Ctx.ConfigItems.Add(new ConfigItem
+            {
+                ConfigName = runIdConfigName,
+                ConfigValue = runId
+            });
+        }
+
         await dbClient.Ctx.SaveChangesAsync(ct);
     }
 
     private async Task UpdateLastIntegrityCheckAsync(DavDatabaseClient dbClient, DavItem davItem, bool isValid, CancellationToken ct)
     {
         var configName = $"integrity.last_check.{davItem.Id}";
-        var configValue = DateTime.Now.ToString("O");
+        var configValue = DateTime.UtcNow.ToString("O");
         
         var existingConfig = await dbClient.Ctx.ConfigItems
             .FirstOrDefaultAsync(c => c.ConfigName == configName, ct);
