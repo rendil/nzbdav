@@ -70,9 +70,6 @@ function IntegrityCheckButton() {
 
     return (
         <div className="d-flex align-items-center gap-3">
-            <Button variant={runButtonVariant} onClick={onRunCheck} disabled={!isRunButtonEnabled}>
-                {runButtonLabel}
-            </Button>
             {isRunning && progressDetails && (
                 <div className="text-muted small">
                     Progress: {progressDetails.fraction} 
@@ -94,6 +91,9 @@ function IntegrityCheckButton() {
                     <em>Connecting to status updates...</em>
                 </div>
             )}
+            <Button variant={runButtonVariant} onClick={onRunCheck} disabled={!isRunButtonEnabled}>
+                {runButtonLabel}
+            </Button>
         </div>
     );
 }
