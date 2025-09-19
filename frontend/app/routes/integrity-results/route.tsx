@@ -467,9 +467,13 @@ function JobRunsList({
                 
                 return (
                     <Card key={run.date} className={`mb-3 ${isActiveRun ? 'border-primary' : ''}`}>
-                        <Card.Header className={isActiveRun ? 'bg-primary bg-opacity-10' : ''}>
-                            <div className="d-flex justify-content-between align-items-center">
-                                <div>
+                        <Card.Header 
+                            className={`${isActiveRun ? 'bg-primary bg-opacity-10' : ''} position-relative`}
+                            style={{ cursor: 'pointer' }}
+                            onClick={() => toggleRun(run.date)}
+                        >
+                            <div className="d-flex justify-content-between align-items-start">
+                                <div className="flex-grow-1">
                                     <div className="d-flex align-items-center mb-1">
                                         <Badge bg="success" className="me-2">
                                             {run.validFiles} valid
@@ -533,42 +537,46 @@ function JobRunsList({
                                         </span>
                                     </div>
                                 </div>
-                            <div className="d-flex align-items-center gap-2">
-                                <button
-                                    className="btn btn-link p-0 text-secondary"
-                                    onClick={() => toggleRun(run.date)}
-                                    title={expandedRuns.has(run.date) ? "Hide Files" : "Show Files"}
-                                >
+                                
+                                {/* Chevron icon in absolute top right corner */}
+                                <div className="position-absolute top-0 end-0 p-3">
                                     <svg 
                                         xmlns="http://www.w3.org/2000/svg" 
                                         width="16" 
                                         height="16" 
                                         fill="currentColor" 
-                                        className={`bi bi-chevron-down ${expandedRuns.has(run.date) ? 'rotate-180' : ''}`}
+                                        className={`bi bi-chevron-down text-secondary ${expandedRuns.has(run.date) ? 'rotate-180' : ''}`}
                                         style={{ transition: 'transform 0.2s ease' }}
                                         viewBox="0 0 16 16"
                                     >
                                         <path fillRule="evenodd" d="M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708"/>
                                     </svg>
-                                </button>
+                                </div>
+                                
+                                {/* Cancel button below main content if active */}
                                 {isActiveRun && isCheckRunning && (
-                                    <Button
-                                        variant="outline-danger"
-                                        size="sm"
-                                        onClick={cancelIntegrityCheck}
-                                        disabled={isCancelling}
-                                    >
-                                        {isCancelling ? (
-                                            <>
-                                                <div className="spinner-border spinner-border-sm me-1" role="status">
-                                                    <span className="visually-hidden">Cancelling...</span>
-                                                </div>
-                                                Cancelling...
-                                            </>
-                                        ) : (
-                                            <>✕ Cancel</>
-                                        )}
-                                    </Button>
+                                    <div className="mt-2">
+                                        <Button
+                                            variant="outline-danger"
+                                            size="sm"
+                                            onClick={(e) => {
+                                                e.stopPropagation(); // Prevent header click
+                                                cancelIntegrityCheck();
+                                            }}
+                                            disabled={isCancelling}
+                                        >
+                                            {isCancelling ? (
+                                                <>
+                                                    <div className="spinner-border spinner-border-sm me-1" role="status">
+                                                        <span className="visually-hidden">Cancelling...</span>
+                                                    </div>
+                                                    Cancelling...
+                                                </>
+                                            ) : (
+                                                <>✕ Cancel</>
+                                            )}
+                                        </Button>
+                                    </div>
                                 )}
                             </div>
                         </div>
