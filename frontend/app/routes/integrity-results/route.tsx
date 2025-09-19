@@ -201,6 +201,7 @@ export default function IntegrityResults(props: Route.ComponentProps) {
     const [isCheckRunning, setIsCheckRunning] = useState(false);
     const [lastProgressUpdate, setLastProgressUpdate] = useState<string | null>(null);
     const [isCancelling, setIsCancelling] = useState(false);
+    const [currentRunId, setCurrentRunId] = useState<string | null>(null);
 
     // Function to refresh integrity data
     const refreshIntegrityData = useCallback(async () => {
@@ -265,23 +266,36 @@ export default function IntegrityResults(props: Route.ComponentProps) {
             ws = new WebSocket(window.location.origin.replace(/^http/, 'ws'));
             
             ws.onmessage = receiveMessage((_, message) => {
-                setLastProgressUpdate(message);
+                // Parse message and run ID (format: "message:runId")
+                const parts = message ? message.split(':') : [];
+                const messageText = parts[0] || message || '';
+                const runId = parts.length > 1 ? parts[parts.length - 1] : null; // Take last part as run ID
+                
+                setLastProgressUpdate(messageText);
                 
                 // Determine if check is running based on progress message
-                const isRunning = message && 
-                    !message.startsWith("complete") && 
-                    !message.startsWith("failed") && 
-                    !message.startsWith("cancelled");
+                const isRunning = messageText && 
+                    !messageText.startsWith("complete") && 
+                    !messageText.startsWith("failed") && 
+                    !messageText.startsWith("cancelled");
                     
                 setIsCheckRunning(isRunning);
                 
-                // Reset cancelling state when check completes
+                // Update current run ID when check starts or continues
+                if (runId && isRunning) {
+                    setCurrentRunId(runId);
+                    console.debug("Active run ID set to:", runId);
+                }
+                
+                // Reset states when check completes
                 if (!isRunning) {
                     setIsCancelling(false);
+                    setCurrentRunId(null);
+                    console.debug("Check completed, clearing run ID");
                 }
                 
                 // When check starts, refresh data to get the new run
-                if (message === "starting") {
+                if (messageText === "starting") {
                     // Immediate refresh plus delayed refresh to catch the new run
                     refreshIntegrityData();
                     setTimeout(() => refreshIntegrityData(), 2000); // Give backend time to create the run
@@ -293,7 +307,7 @@ export default function IntegrityResults(props: Route.ComponentProps) {
                 }
                 
                 // When check completes, stop periodic refresh and do final refresh
-                if (message && (message.startsWith("complete") || message.startsWith("failed") || message.startsWith("cancelled"))) {
+                if (messageText && (messageText.startsWith("complete") || messageText.startsWith("failed") || messageText.startsWith("cancelled"))) {
                     if (refreshInterval) {
                         clearInterval(refreshInterval);
                         refreshInterval = null;
@@ -404,14 +418,24 @@ function JobRunsList({
         setExpandedRuns(newExpanded);
     };
 
-        // Find the run that's most likely active
+        // Find the run that's most likely active using run ID from WebSocket
         const findActiveRun = () => {
             if (!isCheckRunning || jobRuns.length === 0) {
                 console.debug("No active run - isCheckRunning:", isCheckRunning, "jobRuns.length:", jobRuns.length);
                 return null;
             }
             
-            // First priority: look for a run that has a start time but no end time (actively running)
+            // First priority: if we have a current run ID from WebSocket, find exact match
+            if (currentRunId) {
+                const exactMatch = jobRuns.find(run => run.runId === currentRunId);
+                if (exactMatch) {
+                    console.debug("Found exact run ID match:", currentRunId);
+                    return exactMatch;
+                }
+                console.debug("Current run ID not found in data yet:", currentRunId);
+            }
+            
+            // Second priority: look for a run that has a start time but no end time (actively running)
             for (const run of jobRuns) {
                 if (run.startTime && !run.endTime) {
                     console.debug("Found active run (no end time):", run.runId, "started:", run.startTime);
@@ -419,7 +443,7 @@ function JobRunsList({
                 }
             }
             
-            // Second priority: if WebSocket says check is running, find the most recent run
+            // Third priority: if WebSocket says check is running, find the most recent run
             // This handles cases where the run data hasn't been refreshed yet with end time
             const now = new Date();
             const thirtyMinutesAgo = new Date(now.getTime() - 30 * 60 * 1000); // Extend window for longer checks
@@ -428,19 +452,19 @@ function JobRunsList({
                 const runTime = run.startTime ? new Date(run.startTime) : new Date(run.date);
                 // If the run started within the last 30 minutes and we have an active check, assume it's active
                 if (runTime >= thirtyMinutesAgo) {
-                    console.debug("Found recent run as active:", run.runId, "started:", run.startTime || run.date);
+                    console.debug("Found recent run as fallback active:", run.runId, "started:", run.startTime || run.date);
                     return run;
                 }
             }
             
-            console.debug("No active run found despite check running. Runs:", jobRuns.map(r => ({ 
+            console.debug("No active run found despite check running. Current run ID:", currentRunId, "Runs:", jobRuns.map(r => ({ 
                 runId: r.runId, 
                 startTime: r.startTime, 
                 endTime: r.endTime,
                 date: r.date 
             })));
             
-            // If check is running but no recent runs found, don't show any as active
+            // If check is running but no matching runs found, don't show any as active
             // This prevents showing old runs as active when a new check just started
             return null;
         };

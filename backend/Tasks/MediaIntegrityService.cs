@@ -154,7 +154,7 @@ public class MediaIntegrityService : IDisposable
         try
         {
             Log.Information("Starting media integrity check with run ID: {RunId}", runId);
-            _ = _websocketManager.SendMessage(WebsocketTopic.IntegrityCheckProgress, "starting");
+            _ = _websocketManager.SendMessage(WebsocketTopic.IntegrityCheckProgress, $"starting:{runId}");
 
             // Store run start time
             await using var startDbContext = new DavDatabaseContext();
@@ -167,7 +167,7 @@ public class MediaIntegrityService : IDisposable
             {
                 var errorMsg = "Library directory must be configured for Radarr/Sonarr integration";
                 Log.Error(errorMsg);
-                _ = _websocketManager.SendMessage(WebsocketTopic.IntegrityCheckProgress, $"failed: {errorMsg}");
+                _ = _websocketManager.SendMessage(WebsocketTopic.IntegrityCheckProgress, $"failed: {errorMsg}:{runId}");
                 return;
             }
 
@@ -197,7 +197,7 @@ public class MediaIntegrityService : IDisposable
             if (checkItems.Count == 0)
             {
                 Log.Information("No media files found to check");
-                _ = _websocketManager.SendMessage(WebsocketTopic.IntegrityCheckProgress, "complete: 0/0");
+                _ = _websocketManager.SendMessage(WebsocketTopic.IntegrityCheckProgress, $"complete: 0/0:{runId}");
                 return;
             }
 
@@ -275,11 +275,11 @@ public class MediaIntegrityService : IDisposable
 
                 processedFiles++;
                 var progress = $"{processedFiles}/{totalFiles} ({corruptFiles} corrupt)";
-                debounce(() => _websocketManager.SendMessage(WebsocketTopic.IntegrityCheckProgress, progress));
+                debounce(() => _websocketManager.SendMessage(WebsocketTopic.IntegrityCheckProgress, $"{progress}:{runId}"));
             }
 
             var finalReport = $"complete: {processedFiles}/{totalFiles} checked, {corruptFiles} corrupt files found";
-            _ = _websocketManager.SendMessage(WebsocketTopic.IntegrityCheckProgress, finalReport);
+            _ = _websocketManager.SendMessage(WebsocketTopic.IntegrityCheckProgress, $"{finalReport}:{runId}");
             Log.Information("Media integrity check completed: {Report}", finalReport);
 
             // Store run end time
@@ -290,7 +290,7 @@ public class MediaIntegrityService : IDisposable
         catch (OperationCanceledException)
         {
             Log.Information("Media integrity check was cancelled");
-            _ = _websocketManager.SendMessage(WebsocketTopic.IntegrityCheckProgress, "cancelled");
+            _ = _websocketManager.SendMessage(WebsocketTopic.IntegrityCheckProgress, $"cancelled:{runId}");
             
             // Store run end time for cancelled
             try
@@ -307,7 +307,7 @@ public class MediaIntegrityService : IDisposable
         catch (Exception ex)
         {
             Log.Error(ex, "Error during media integrity check");
-            _ = _websocketManager.SendMessage(WebsocketTopic.IntegrityCheckProgress, $"failed: {ex.Message}");
+            _ = _websocketManager.SendMessage(WebsocketTopic.IntegrityCheckProgress, $"failed: {ex.Message}:{runId}");
             
             // Store run end time for failed
             try
