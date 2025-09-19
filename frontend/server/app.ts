@@ -40,7 +40,14 @@ const setApiKeyForAuthenticatedRequests = async (req: express.Request) => {
   // if the request is not authenticated, do nothing
   const authenticated = await isAuthenticated(req.headers.cookie);
   console.log(`[AUTH DEBUG] User authenticated: ${authenticated}`);
-  if (!authenticated) return;
+
+  // TEMPORARY FIX: For server-side rendering, add API key even if not authenticated
+  // This allows the loader to work during SSR when cookies might not be properly forwarded
+  const isServerSideRequest =
+    !req.headers.cookie || req.headers.cookie.length === 0;
+  console.log(`[AUTH DEBUG] Is server-side request: ${isServerSideRequest}`);
+
+  if (!authenticated && !isServerSideRequest) return;
 
   // otherwise, set the api key header
   req.headers["x-api-key"] = process.env.FRONTEND_BACKEND_API_KEY || "";
