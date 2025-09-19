@@ -61,6 +61,39 @@ public class IntegrityDiagnosticController(ConfigManager configManager, DavDatab
             ? mostRecentCheck.AddHours(intervalHours)
             : DateTime.Now; // If no previous checks, should run immediately
 
+        // Calculate eligible files for next check
+        var eligibleFileCount = 0;
+        if (libraryDirExists && libraryFileCount > 0)
+        {
+            try
+            {
+                var cutoffTime = DateTime.Now.AddDays(-intervalDays);
+                var allFiles = Directory.EnumerateFiles(libraryDir!, "*", SearchOption.AllDirectories)
+                    .Where(file => IsMediaFile(Path.GetExtension(file).ToLowerInvariant()));
+
+                foreach (var filePath in allFiles)
+                {
+                    var fileHash = GetFilePathHash(filePath);
+                    var lastCheckConfig = $"integrity.last_check.library.{fileHash}";
+                    
+                    var lastCheckValue = await dbClient.Ctx.ConfigItems
+                        .Where(c => c.ConfigName == lastCheckConfig)
+                        .Select(c => c.ConfigValue)
+                        .FirstOrDefaultAsync(HttpContext.RequestAborted);
+
+                    if (lastCheckValue == null || !DateTime.TryParse(lastCheckValue, out var lastCheck) || lastCheck <= cutoffTime)
+                    {
+                        eligibleFileCount++;
+                        if (eligibleFileCount >= maxFiles) break; // Limit for performance
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                eligibleFileCount = -1; // Error calculating
+            }
+        }
+
         var response = new
         {
             Configuration = new
@@ -76,6 +109,7 @@ public class IntegrityDiagnosticController(ConfigManager configManager, DavDatab
             {
                 DirectoryExists = libraryDirExists,
                 FileCount = libraryFileCount,
+                EligibleFileCount = eligibleFileCount,
                 Error = libraryFileCount == -1 ? "Error accessing library directory" : null
             },
             SchedulingInfo = new
@@ -83,11 +117,12 @@ public class IntegrityDiagnosticController(ConfigManager configManager, DavDatab
                 MostRecentCheck = mostRecentCheck != DateTime.MinValue ? mostRecentCheck.ToString("yyyy-MM-dd HH:mm:ss") : "Never",
                 NextExpectedCheck = nextExpectedCheck.ToString("yyyy-MM-dd HH:mm:ss"),
                 HoursUntilNext = (nextExpectedCheck - DateTime.Now).TotalHours,
-                IsOverdue = DateTime.Now > nextExpectedCheck && isEnabled
+                IsOverdue = DateTime.Now > nextExpectedCheck && isEnabled,
+                CutoffTime = DateTime.Now.AddDays(-intervalDays).ToString("yyyy-MM-dd HH:mm:ss")
             },
             RecentChecks = lastCheckInfo,
             SystemTime = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
-            Recommendations = GetRecommendations(isEnabled, libraryDirExists, mostRecentCheck, intervalHours)
+            Recommendations = GetRecommendations(isEnabled, libraryDirExists, mostRecentCheck, intervalHours, eligibleFileCount, intervalDays)
         };
 
         return Ok(response);
@@ -103,7 +138,14 @@ public class IntegrityDiagnosticController(ConfigManager configManager, DavDatab
         return mediaExtensions.Contains(extension);
     }
 
-    private static List<string> GetRecommendations(bool isEnabled, bool libraryDirExists, DateTime mostRecentCheck, int intervalHours)
+    private static string GetFilePathHash(string filePath)
+    {
+        // Create a simple hash of the file path for unique identification
+        return BitConverter.ToString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(filePath))).Replace("-", "")[..16];
+    }
+
+    private static List<string> GetRecommendations(bool isEnabled, bool libraryDirExists, DateTime mostRecentCheck, int intervalHours, int eligibleFileCount = 0, int intervalDays = 7)
     {
         var recommendations = new List<string>();
 
@@ -127,8 +169,18 @@ public class IntegrityDiagnosticController(ConfigManager configManager, DavDatab
             var hoursSinceLastCheck = (DateTime.Now - mostRecentCheck).TotalHours;
             if (hoursSinceLastCheck > intervalHours * 2)
             {
-                recommendations.Add($"Last check was {hoursSinceLastCheck:F1} hours ago, which is more than 2x the interval. Check logs for errors.");
+                recommendations.Add($"Last check was {hoursSinceLastCheck:F1} hours ago, which is more than 2x the interval. Check logs for errors or restart the service.");
             }
+        }
+
+        if (isEnabled && eligibleFileCount == 0)
+        {
+            recommendations.Add($"No files are eligible for checking due to interval_days setting. Files checked within the last {intervalDays} days won't be rechecked. Consider reducing interval_days if you want more frequent checks.");
+        }
+
+        if (isEnabled && eligibleFileCount > 0)
+        {
+            recommendations.Add($"Background task should be running but {eligibleFileCount} files are eligible for checking. This suggests the background scheduler has stopped.");
         }
 
         if (recommendations.Count == 0)
