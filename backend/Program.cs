@@ -109,12 +109,6 @@ class Program
 
         // run
         var app = builder.Build();
-
-        // Explicitly initialize MediaIntegrityService to start background scheduler
-        // This ensures the singleton is created at startup, not on first request
-        var mediaIntegrityService = app.Services.GetRequiredService<MediaIntegrityService>();
-        Log.Information("MediaIntegrityService has been initialized at startup");
-
         app.UseSerilogRequestLogging();
         app.UseMiddleware<ExceptionMiddleware>();
         app.UseWebSockets();
