@@ -623,7 +623,7 @@ function JobRunsList({
                             onClick={() => toggleRun(run.date)}
                         >
                             <div className="d-flex justify-content-between align-items-start">
-                                <div className="flex-grow-1">
+                                <div className="flex-grow-1" style={{ paddingRight: '50px' }}>
                                     <div className="d-flex align-items-center mb-1">
                                         <Badge bg="success" className="me-2">
                                             {run.validFiles} valid
@@ -680,11 +680,35 @@ function JobRunsList({
                                         )}
                                     </div>
                                     
-                                    <div className="mt-2">
+                                    <div className="mt-2 d-flex justify-content-between align-items-center">
                                         <span className="fw-bold">
                                             {run.totalFiles} files checked
                                             {isActiveRun && <span className="text-muted"> (updating...)</span>}
                                         </span>
+                                        
+                                        {/* Cancel button positioned to the right of files checked */}
+                                        {isActiveRun && isCheckRunning && (
+                                            <Button
+                                                variant="outline-danger"
+                                                size="sm"
+                                                onClick={(e) => {
+                                                    e.stopPropagation(); // Prevent header click
+                                                    cancelIntegrityCheck();
+                                                }}
+                                                disabled={isCancelling}
+                                            >
+                                                {isCancelling ? (
+                                                    <>
+                                                        <div className="spinner-border spinner-border-sm me-1" role="status">
+                                                            <span className="visually-hidden">Cancelling...</span>
+                                                        </div>
+                                                        Cancelling...
+                                                    </>
+                                                ) : (
+                                                    <>✕ Cancel</>
+                                                )}
+                                            </Button>
+                                        )}
                                     </div>
                                 </div>
                                 
@@ -702,32 +726,6 @@ function JobRunsList({
                                         <path fillRule="evenodd" d="M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708"/>
                                     </svg>
                                 </div>
-                                
-                                {/* Cancel button below main content if active */}
-                                {isActiveRun && isCheckRunning && (
-                                    <div className="mt-2">
-                                        <Button
-                                            variant="outline-danger"
-                                            size="sm"
-                                            onClick={(e) => {
-                                                e.stopPropagation(); // Prevent header click
-                                                cancelIntegrityCheck();
-                                            }}
-                                            disabled={isCancelling}
-                                        >
-                                            {isCancelling ? (
-                                                <>
-                                                    <div className="spinner-border spinner-border-sm me-1" role="status">
-                                                        <span className="visually-hidden">Cancelling...</span>
-                                                    </div>
-                                                    Cancelling...
-                                                </>
-                                            ) : (
-                                                <>✕ Cancel</>
-                                            )}
-                                        </Button>
-                                    </div>
-                                )}
                             </div>
                         </Card.Header>
                     <Collapse in={expandedRuns.has(run.date)}>

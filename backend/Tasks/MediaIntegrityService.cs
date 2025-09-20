@@ -28,7 +28,7 @@ public class MediaIntegrityService : IDisposable
     private readonly UsenetStreamingClient _usenetClient;
     private CancellationTokenSource _cancellationTokenSource;
     private readonly SemaphoreSlim _semaphore = new(1, 1);
-    
+
     private static Task? _runningTask;
     private static readonly SemaphoreSlim StaticSemaphore = new(1, 1);
 
@@ -39,17 +39,23 @@ public class MediaIntegrityService : IDisposable
         UsenetStreamingClient usenetClient
     )
     {
+        Log.Information("Initializing MediaIntegrityService");
         _configManager = configManager;
         _websocketManager = websocketManager;
         _arrManager = arrManager;
         _usenetClient = usenetClient;
         _cancellationTokenSource = CancellationTokenSource
             .CreateLinkedTokenSource(SigtermUtil.GetCancellationToken());
-        
+
         // Start background integrity checking if enabled
         if (_configManager.IsIntegrityCheckingEnabled())
         {
+            Log.Information("Integrity checking is enabled, starting background scheduler");
             _ = StartBackgroundIntegrityCheckAsync(_cancellationTokenSource.Token);
+        }
+        else
+        {
+            Log.Information("Integrity checking is disabled, background scheduler will not start");
         }
     }
 
@@ -82,7 +88,7 @@ public class MediaIntegrityService : IDisposable
             {
                 Log.Information("Cancelling active integrity check");
                 _cancellationTokenSource.Cancel();
-                
+
                 // Wait a short time for graceful cancellation
                 try
                 {
@@ -92,14 +98,14 @@ public class MediaIntegrityService : IDisposable
                 {
                     // Expected when cancellation succeeds
                 }
-                
+
                 // Create a new cancellation token source for future operations
                 _cancellationTokenSource?.Dispose();
                 _cancellationTokenSource = new CancellationTokenSource();
-                
+
                 return true;
             }
-            
+
             return false; // No active task to cancel
         }
         finally
@@ -111,15 +117,15 @@ public class MediaIntegrityService : IDisposable
     public async Task CheckSingleFileIntegrityAsync(DavItem davItem, CancellationToken ct)
     {
         Log.Information("Starting single file integrity check for: {FilePath} (ID: {DavItemId})", davItem.Path, davItem.Id);
-        
+
         try
         {
             await using var dbContext = new DavDatabaseContext();
             var dbClient = new DavDatabaseClient(dbContext);
-            
+
             var runId = Guid.NewGuid().ToString();
             var (isCorrupt, errorMessage) = await CheckFileIntegrityAsync(davItem, ct);
-            
+
             string? actionTaken = null;
             if (isCorrupt)
             {
@@ -130,7 +136,7 @@ public class MediaIntegrityService : IDisposable
             {
                 Log.Information("Single file integrity check PASSED for {FilePath}", davItem.Path);
             }
-            
+
             // Store the check results
             await StoreIntegrityCheckDetailsAsync(dbClient, davItem, !isCorrupt, errorMessage, actionTaken, runId, ct);
         }
@@ -143,12 +149,12 @@ public class MediaIntegrityService : IDisposable
     public async Task CheckSingleLibraryFileIntegrityAsync(string filePath, CancellationToken ct)
     {
         Log.Information("Starting single library file integrity check for: {FilePath}", filePath);
-        
+
         try
         {
             await using var dbContext = new DavDatabaseContext();
             var dbClient = new DavDatabaseClient(dbContext);
-            
+
             // Resolve symlink to get the target path (should be in .ids directory)
             var fileInfo = new FileInfo(filePath);
             if (!fileInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
@@ -189,10 +195,10 @@ public class MediaIntegrityService : IDisposable
                 Log.Warning("DavItem is {ItemType}, only NZB and RAR files supported for streaming integrity check: {FilePath}", davItem.Type, filePath);
                 return;
             }
-            
+
             var runId = Guid.NewGuid().ToString();
             var (isCorrupt, errorMessage) = await CheckFileIntegrityAsync(davItem, ct);
-            
+
             string? actionTaken = null;
             if (isCorrupt)
             {
@@ -203,7 +209,7 @@ public class MediaIntegrityService : IDisposable
             {
                 Log.Information("Single library file integrity check PASSED for {FilePath}", filePath);
             }
-            
+
             // Store the check results (use library file path for storage)
             await StoreIntegrityCheckDetailsAsync(dbClient, filePath, !isCorrupt, errorMessage, actionTaken, runId, ct);
         }
@@ -216,29 +222,35 @@ public class MediaIntegrityService : IDisposable
     private async Task StartBackgroundIntegrityCheckAsync(CancellationToken ct)
     {
         Log.Information("Starting background integrity check scheduler");
-        
+        var loopCount = 0;
+
         while (!ct.IsCancellationRequested)
         {
             try
             {
+                loopCount++;
+                Log.Information("Background scheduler loop #{LoopCount} - checking if integrity check is needed", loopCount);
+
                 // Check if a check is needed based on last check time
                 var shouldRunCheck = await ShouldRunBackgroundCheckAsync(ct);
-                
+
                 if (shouldRunCheck)
                 {
-                    Log.Information("Background integrity check is due, starting check");
-                    
+                    Log.Information("Background integrity check is due, attempting to start check");
+
                     await StaticSemaphore.WaitAsync(ct);
                     try
                     {
                         if (_runningTask is { IsCompleted: false })
                         {
-                            Log.Debug("Integrity check already running, skipping background check");
+                            Log.Information("Integrity check already running, skipping background check");
                             continue; // Skip if already running
                         }
-                            
+
+                        Log.Information("Starting background integrity check execution");
                         _runningTask = Task.Run(() => PerformIntegrityCheckAsync(ct), ct);
                         await _runningTask;
+                        Log.Information("Background integrity check execution completed");
                     }
                     finally
                     {
@@ -247,10 +259,11 @@ public class MediaIntegrityService : IDisposable
                 }
                 else
                 {
-                    Log.Debug("Background integrity check not due yet");
+                    Log.Information("Background integrity check not due yet, waiting 10 minutes");
                 }
-                
+
                 // Wait 10 minutes before checking again
+                Log.Information("Background scheduler sleeping for 10 minutes until next check");
                 await Task.Delay(TimeSpan.FromMinutes(10), ct);
             }
             catch (OperationCanceledException)
@@ -260,11 +273,13 @@ public class MediaIntegrityService : IDisposable
             }
             catch (Exception ex)
             {
-                Log.Error(ex, "Error in background integrity check scheduler");
+                Log.Error(ex, "Error in background integrity check scheduler, will retry in 30 minutes");
                 // Wait before retrying on error
                 await Task.Delay(TimeSpan.FromMinutes(30), ct);
             }
         }
+
+        Log.Information("Background integrity check scheduler has exited after {LoopCount} loops", loopCount);
     }
 
     private async Task PerformIntegrityCheckAsync(CancellationToken ct)
@@ -272,7 +287,7 @@ public class MediaIntegrityService : IDisposable
         // Generate a unique run ID for this execution
         var runId = Guid.NewGuid().ToString();
         var startTime = DateTime.UtcNow;
-        
+
         try
         {
             Log.Information("Starting media integrity check with run ID: {RunId}", runId);
@@ -308,14 +323,14 @@ public class MediaIntegrityService : IDisposable
             {
                 // Fallback to internal files for non-arr usage
                 var davItems = await GetDavItemsToCheckAsync(dbClient, ct);
-                checkItems = davItems.Select(item => new IntegrityCheckItem 
-                { 
-                    DavItem = item, 
+                checkItems = davItems.Select(item => new IntegrityCheckItem
+                {
+                    DavItem = item,
                     LibraryFilePath = null // No library file path for internal items
                 }).ToList();
                 Log.Information("Checking {Count} internal nzbdav files", checkItems.Count);
             }
-            
+
             if (checkItems.Count == 0)
             {
                 Log.Information("No media files found to check");
@@ -336,17 +351,17 @@ public class MediaIntegrityService : IDisposable
                 try
                 {
                     var (isCorrupt, errorMessage) = await CheckFileIntegrityAsync(checkItem.DavItem, ct);
-                    
+
                     if (isCorrupt)
                     {
                         corruptFiles++;
                         Log.Warning("Corrupt media file detected: {FilePath} - {Error}", checkItem.DavItem.Path, errorMessage);
-                        
+
                         // Use library file path for arr integration, or symlink path for internal files
-                        var filePath = checkItem.LibraryFilePath ?? 
+                        var filePath = checkItem.LibraryFilePath ??
                             DatabaseStoreSymlinkFile.GetTargetPath(checkItem.DavItem, _configManager.GetRcloneMountDir());
                         var actionTaken = await HandleCorruptFileAsync(dbClient, checkItem.DavItem, filePath, ct);
-                        
+
                         // Store error details and action taken
                         if (checkItem.LibraryFilePath != null)
                         {
@@ -396,7 +411,7 @@ public class MediaIntegrityService : IDisposable
         {
             Log.Information("Media integrity check was cancelled");
             _ = _websocketManager.SendMessage(WebsocketTopic.IntegrityCheckProgress, $"cancelled:{runId}");
-            
+
             // Store run end time for cancelled
             try
             {
@@ -413,7 +428,7 @@ public class MediaIntegrityService : IDisposable
         {
             Log.Error(ex, "Error during media integrity check");
             _ = _websocketManager.SendMessage(WebsocketTopic.IntegrityCheckProgress, $"failed: {ex.Message}:{runId}");
-            
+
             // Store run end time for failed
             try
             {
@@ -431,7 +446,7 @@ public class MediaIntegrityService : IDisposable
     private async Task<List<DavItem>> GetDavItemsToCheckAsync(DavDatabaseClient dbClient, CancellationToken ct)
     {
         var cutoffTime = DateTime.Now.AddDays(-_configManager.GetIntegrityCheckIntervalDays());
-        
+
         // Get all media files (NzbFile and RarFile types) that haven't been checked recently
         var query = dbClient.Ctx.Items
             .Where(item => (item.Type == DavItem.ItemType.NzbFile || item.Type == DavItem.ItemType.RarFile))
@@ -445,7 +460,7 @@ public class MediaIntegrityService : IDisposable
                 .Where(c => DateTime.Parse(c.ConfigValue) > cutoffTime)
                 .Select(c => Guid.Parse(c.ConfigName.Substring("integrity.last_check.".Length)))
                 .ToListAsync(ct);
-                
+
             query = query.Where(item => !recentlyCheckedIds.Contains(item.Id));
         }
 
@@ -456,7 +471,7 @@ public class MediaIntegrityService : IDisposable
     {
         var filePaths = new List<string>();
         var cutoffTime = DateTime.Now.AddDays(-_configManager.GetIntegrityCheckIntervalDays());
-        
+
         try
         {
             // Get all media files in library directory recursively
@@ -470,10 +485,10 @@ public class MediaIntegrityService : IDisposable
             foreach (var filePath in allFiles)
             {
                 ct.ThrowIfCancellationRequested();
-                
+
                 var fileHash = GetFilePathHash(filePath);
                 var lastCheckConfig = $"integrity.last_check.library.{fileHash}";
-                
+
                 using var dbContext = new DavDatabaseContext();
                 var lastCheckValue = await dbContext.ConfigItems
                     .Where(c => c.ConfigName == lastCheckConfig)
@@ -483,7 +498,7 @@ public class MediaIntegrityService : IDisposable
                 if (lastCheckValue == null || !DateTime.TryParse(lastCheckValue, out var lastCheck) || lastCheck <= cutoffTime)
                 {
                     filePaths.Add(filePath);
-                    
+
                     // Limit the number of files per run
                     if (filePaths.Count >= _configManager.GetMaxFilesToCheckPerRun())
                         break;
@@ -504,7 +519,7 @@ public class MediaIntegrityService : IDisposable
     {
         var checkItems = new List<IntegrityCheckItem>();
         var cutoffTime = DateTime.Now.AddDays(-_configManager.GetIntegrityCheckIntervalDays());
-        
+
         try
         {
             // Get media files in library directory recursively (use enumerable for efficiency)
@@ -520,13 +535,13 @@ public class MediaIntegrityService : IDisposable
             {
                 ct.ThrowIfCancellationRequested();
                 totalProcessed++;
-                
+
                 try
                 {
                     // Check if we should skip this file based on last check time
                     var fileHash = GetFilePathHash(filePath);
                     var lastCheckConfig = $"integrity.last_check.library.{fileHash}";
-                    
+
                     var lastCheckValue = await dbClient.Ctx.ConfigItems
                         .Where(c => c.ConfigName == lastCheckConfig)
                         .Select(c => c.ConfigValue)
@@ -568,7 +583,7 @@ public class MediaIntegrityService : IDisposable
                     if (anyDavItem == null)
                     {
                         // DavItem doesn't exist - likely imported outside nzbdav or deleted
-                        Log.Debug("Skipping {FilePath}: DavItem {DavItemId} not found (file may have been imported outside nzbdav)", 
+                        Log.Debug("Skipping {FilePath}: DavItem {DavItemId} not found (file may have been imported outside nzbdav)",
                             Path.GetFileName(filePath), davItemId);
                         continue;
                     }
@@ -576,20 +591,20 @@ public class MediaIntegrityService : IDisposable
                     // Check if it's a streamable file type (NZB or RAR)
                     if (anyDavItem.Type != DavItem.ItemType.NzbFile && anyDavItem.Type != DavItem.ItemType.RarFile)
                     {
-                        Log.Debug("Skipping {FilePath}: DavItem is {ItemType} (only NZB and RAR files supported for streaming integrity check)", 
+                        Log.Debug("Skipping {FilePath}: DavItem is {ItemType} (only NZB and RAR files supported for streaming integrity check)",
                             Path.GetFileName(filePath), anyDavItem.Type);
                         continue;
                     }
 
                     // Valid streamable file found
-                    checkItems.Add(new IntegrityCheckItem 
-                    { 
-                        DavItem = anyDavItem, 
-                        LibraryFilePath = filePath 
+                    checkItems.Add(new IntegrityCheckItem
+                    {
+                        DavItem = anyDavItem,
+                        LibraryFilePath = filePath
                     });
-                    Log.Debug("Added {FilePath} for integrity check (DavItem: {DavItemPath}, Type: {ItemType})", 
+                    Log.Debug("Added {FilePath} for integrity check (DavItem: {DavItemPath}, Type: {ItemType})",
                         Path.GetFileName(filePath), anyDavItem.Path, anyDavItem.Type);
-                    
+
                     // Limit the number of files per run
                     if (checkItems.Count >= maxFiles)
                     {
@@ -604,14 +619,14 @@ public class MediaIntegrityService : IDisposable
             }
 
             var skippedCount = totalProcessed - checkItems.Count;
-            Log.Information("Library scan complete: {ResolvedCount} files ready for integrity check, {SkippedCount} files skipped", 
+            Log.Information("Library scan complete: {ResolvedCount} files ready for integrity check, {SkippedCount} files skipped",
                 checkItems.Count, skippedCount);
-            
+
             if (skippedCount > 0)
             {
                 Log.Information("Skipped files are either: files imported outside nzbdav, deleted DavItems, or unsupported file types");
             }
-            
+
             return checkItems;
         }
         catch (Exception ex)
@@ -633,10 +648,10 @@ public class MediaIntegrityService : IDisposable
         var fileHash = GetFilePathHash(filePath);
         var configName = $"integrity.last_check.library.{fileHash}";
         var configValue = DateTime.UtcNow.ToString("O");
-        
+
         var existingConfig = await dbClient.Ctx.ConfigItems
             .FirstOrDefaultAsync(c => c.ConfigName == configName, ct);
-            
+
         if (existingConfig != null)
         {
             existingConfig.ConfigValue = configValue;
@@ -654,7 +669,7 @@ public class MediaIntegrityService : IDisposable
         var statusConfigName = $"integrity.status.library.{fileHash}";
         var statusConfig = await dbClient.Ctx.ConfigItems
             .FirstOrDefaultAsync(c => c.ConfigName == statusConfigName, ct);
-            
+
         if (statusConfig != null)
         {
             statusConfig.ConfigValue = isValid ? "valid" : "corrupt";
@@ -672,7 +687,7 @@ public class MediaIntegrityService : IDisposable
         var pathConfigName = $"integrity.path.library.{fileHash}";
         var pathConfig = await dbClient.Ctx.ConfigItems
             .FirstOrDefaultAsync(c => c.ConfigName == pathConfigName, ct);
-            
+
         if (pathConfig != null)
         {
             pathConfig.ConfigValue = filePath;
@@ -692,7 +707,7 @@ public class MediaIntegrityService : IDisposable
     private async Task<(bool isCorrupt, string? errorMessage)> CheckFileIntegrityAsync(DavItem davItem, CancellationToken ct)
     {
         var fileExtension = Path.GetExtension(davItem.Name).ToLowerInvariant();
-        
+
         // Check if it's a media file type we can verify
         if (!IsMediaFile(fileExtension))
         {
@@ -704,7 +719,7 @@ public class MediaIntegrityService : IDisposable
             // Get the file data from database and create appropriate stream
             await using var dbContext = new DavDatabaseContext();
             var dbClient = new DavDatabaseClient(dbContext);
-            
+
             Stream stream;
             if (davItem.Type == DavItem.ItemType.NzbFile)
             {
@@ -731,16 +746,16 @@ public class MediaIntegrityService : IDisposable
                 Log.Debug("Skipping integrity check for unsupported file type: {FilePath} (Type: {ItemType})", davItem.Path, davItem.Type);
                 return (false, null); // Consider unsupported types as valid
             }
-            
+
             // Use FFMpegCore to analyze the entire stream for media integrity
             var enableMp4DeepScan = _configManager.IsMp4DeepScanEnabled();
             var isValid = await FfprobeUtil.IsValidMediaStreamAsync(stream, davItem.Path, enableMp4DeepScan, ct);
-            
+
             // Clean up the stream
             await stream.DisposeAsync();
-            
+
             var isCorrupt = !isValid;
-            
+
             if (isCorrupt)
             {
                 Log.Warning("File integrity check FAILED for {FilePath}: Invalid or corrupt media content", davItem.Path);
@@ -755,7 +770,7 @@ public class MediaIntegrityService : IDisposable
         catch (UsenetArticleNotFoundException ex)
         {
             Log.Warning("Missing usenet articles detected for {FilePath}: {Message}", davItem.Path, ex.Message);
-            
+
             // Missing articles mean the file is definitely corrupt/incomplete
             // This is similar to how the download process handles missing articles
             return (true, $"Missing usenet articles: {ex.Message}"); // Mark as corrupt
@@ -763,7 +778,7 @@ public class MediaIntegrityService : IDisposable
         catch (Exception ex)
         {
             Log.Error(ex, "Error running ffprobe on {FilePath}", davItem.Path);
-            
+
             // If ffprobe is not found or can't be started, this is a configuration issue
             // We should treat this as a problem that needs attention
             if (ex is System.ComponentModel.Win32Exception win32Ex && win32Ex.NativeErrorCode == 2)
@@ -773,7 +788,7 @@ public class MediaIntegrityService : IDisposable
                 // This prevents silent failures where users think files are checked but they're not
                 return (true, "FFmpeg/ffprobe not found - please ensure FFmpeg is installed");
             }
-            
+
             // For other errors, assume file is ok but log the issue
             return (false, $"Error during integrity check: {ex.Message}");
         }
@@ -787,7 +802,7 @@ public class MediaIntegrityService : IDisposable
             ".mpg", ".mpeg", ".m2ts", ".ts", ".mts", ".vob", ".3gp", ".f4v",
             ".mp3", ".flac", ".aac", ".ogg", ".wma", ".wav", ".m4a"
         };
-        
+
         return mediaExtensions.Contains(extension);
     }
 
@@ -795,7 +810,7 @@ public class MediaIntegrityService : IDisposable
     private async Task<string> HandleCorruptFileAsync(DavDatabaseClient dbClient, DavItem? davItem, string filePath, CancellationToken ct)
     {
         var action = _configManager.GetCorruptFileAction();
-        
+
         // Auto-monitor corrupt files before deletion if enabled (for re-download)
         if (_configManager.IsAutoMonitorEnabled() && (action == "delete" || action == "delete_via_arr"))
         {
@@ -817,7 +832,7 @@ public class MediaIntegrityService : IDisposable
                 Log.Warning(ex, "Error monitoring corrupt file before deletion: {FilePath}", filePath);
             }
         }
-        
+
         switch (action.ToLowerInvariant())
         {
             case "delete":
@@ -828,7 +843,7 @@ public class MediaIntegrityService : IDisposable
                         File.Delete(filePath);
                         Log.Information("Deleted corrupt file: {FilePath}", filePath);
                     }
-                    
+
                     // Remove from database if this is a DavItem
                     if (davItem != null)
                     {
@@ -842,13 +857,13 @@ public class MediaIntegrityService : IDisposable
                     Log.Error(ex, "Error deleting corrupt file: {FilePath}", filePath);
                     return $"Failed to delete file: {ex.Message}";
                 }
-                
+
             case "delete_via_arr":
                 try
                 {
                     Log.Information("Attempting to delete corrupt file via Radarr/Sonarr: {FilePath}", filePath);
                     var success = await _arrManager.DeleteFileFromArrAsync(filePath, ct);
-                    
+
                     if (success)
                     {
                         Log.Information("Successfully deleted corrupt file via Radarr/Sonarr: {FilePath}", filePath);
@@ -863,7 +878,7 @@ public class MediaIntegrityService : IDisposable
                     else
                     {
                         Log.Warning("Failed to delete corrupt file via Radarr/Sonarr: {FilePath}", filePath);
-                        
+
                         // Check if direct deletion fallback is enabled
                         if (_configManager.IsDirectDeletionFallbackEnabled())
                         {
@@ -874,7 +889,7 @@ public class MediaIntegrityService : IDisposable
                                 File.Delete(filePath);
                                 Log.Information("Deleted corrupt file directly as fallback: {FilePath}", filePath);
                             }
-                            
+
                             // Remove from database (if this is a DavItem)
                             if (davItem != null)
                             {
@@ -896,13 +911,13 @@ public class MediaIntegrityService : IDisposable
                     Log.Error(ex, "Error deleting corrupt file via Radarr/Sonarr: {FilePath}", filePath);
                     return $"Error during Radarr/Sonarr deletion: {ex.Message}";
                 }
-                
+
             case "quarantine":
                 try
                 {
                     var quarantineDir = Path.Join(_configManager.GetRcloneMountDir(), "quarantine");
                     Directory.CreateDirectory(quarantineDir);
-                    
+
                     var quarantinePath = Path.Join(quarantineDir, Path.GetFileName(filePath));
                     if (File.Exists(filePath))
                     {
@@ -917,7 +932,7 @@ public class MediaIntegrityService : IDisposable
                     Log.Error(ex, "Error quarantining corrupt file: {FilePath}", filePath);
                     return $"Failed to quarantine file: {ex.Message}";
                 }
-                
+
             case "log":
             default:
                 // Just log the issue (already done above)
@@ -929,12 +944,12 @@ public class MediaIntegrityService : IDisposable
     {
         var fileHash = GetFilePathHash(filePath);
         await StoreIntegrityCheckDetailsForHashAsync(dbClient, fileHash, isValid, errorMessage, actionTaken, runId, ct);
-        
+
         // Also store the file path for display purposes (library files)
         var pathConfigName = $"integrity.path.library.{fileHash}";
         var pathConfig = await dbClient.Ctx.ConfigItems
             .FirstOrDefaultAsync(c => c.ConfigName == pathConfigName, ct);
-            
+
         if (pathConfig != null)
         {
             pathConfig.ConfigValue = filePath;
@@ -947,7 +962,7 @@ public class MediaIntegrityService : IDisposable
                 ConfigValue = filePath
             });
         }
-        
+
         await dbClient.Ctx.SaveChangesAsync(ct);
     }
 
@@ -959,11 +974,11 @@ public class MediaIntegrityService : IDisposable
     private async Task StoreIntegrityCheckDetailsForHashAsync(DavDatabaseClient dbClient, string identifier, bool isValid, string? errorMessage, string? actionTaken, string runId, CancellationToken ct)
     {
         var now = DateTime.UtcNow.ToString("O");
-        
+
         // Determine if this is a library file or internal DavItem
         bool isLibraryFile = !Guid.TryParse(identifier, out _);
         string prefix = isLibraryFile ? "library." : "";
-        
+
         // Store last check timestamp
         var lastCheckConfigName = $"integrity.last_check.{prefix}{identifier}";
         var lastCheckConfig = await dbClient.Ctx.ConfigItems
@@ -1062,10 +1077,10 @@ public class MediaIntegrityService : IDisposable
     {
         var configName = $"integrity.last_check.{davItem.Id}";
         var configValue = DateTime.UtcNow.ToString("O");
-        
+
         var existingConfig = await dbClient.Ctx.ConfigItems
             .FirstOrDefaultAsync(c => c.ConfigName == configName, ct);
-            
+
         if (existingConfig != null)
         {
             existingConfig.ConfigValue = configValue;
@@ -1083,7 +1098,7 @@ public class MediaIntegrityService : IDisposable
         var statusConfigName = $"integrity.status.{davItem.Id}";
         var statusConfig = await dbClient.Ctx.ConfigItems
             .FirstOrDefaultAsync(c => c.ConfigName == statusConfigName, ct);
-            
+
         if (statusConfig != null)
         {
             statusConfig.ConfigValue = isValid ? "valid" : "corrupt";
@@ -1104,10 +1119,10 @@ public class MediaIntegrityService : IDisposable
     {
         var configName = $"integrity.run_{type}.{runId}";
         var configValue = timestamp.ToString("O");
-        
+
         var existingConfig = await dbClient.Ctx.ConfigItems
             .FirstOrDefaultAsync(c => c.ConfigName == configName, ct);
-            
+
         if (existingConfig != null)
         {
             existingConfig.ConfigValue = configValue;
@@ -1130,48 +1145,60 @@ public class MediaIntegrityService : IDisposable
         {
             var intervalHours = _configManager.GetIntegrityCheckIntervalHours();
             var intervalDays = _configManager.GetIntegrityCheckIntervalDays();
-            
+
+            Log.Information("Checking if background integrity check should run - intervalHours: {IntervalHours}, intervalDays: {IntervalDays}", intervalHours, intervalDays);
+
             // Use the more restrictive of the two intervals
             var effectiveIntervalHours = Math.Max(intervalHours, intervalDays * 24);
-            
+
+            Log.Information("Effective interval calculated as: {EffectiveHours} hours", effectiveIntervalHours);
+
             await using var dbContext = new DavDatabaseContext();
             var dbClient = new DavDatabaseClient(dbContext);
-            
+
             // Get the most recent check time from any file
             var mostRecentConfig = await dbClient.Ctx.ConfigItems
                 .Where(c => c.ConfigName.StartsWith("integrity.last_check."))
                 .OrderByDescending(c => c.ConfigValue)
                 .FirstOrDefaultAsync(ct);
-                
+
             if (mostRecentConfig == null)
             {
                 Log.Information("No previous integrity checks found, background check is due");
                 return true; // No previous checks, so run now
             }
-            
+
+            Log.Information("Found most recent check config: {ConfigName} = {ConfigValue}", mostRecentConfig.ConfigName, mostRecentConfig.ConfigValue);
+
             if (!DateTime.TryParse(mostRecentConfig.ConfigValue, out var lastCheckTime))
             {
-                Log.Warning("Could not parse last check time: {ConfigValue}", mostRecentConfig.ConfigValue);
+                Log.Warning("Could not parse last check time: {ConfigValue}, assuming check is due", mostRecentConfig.ConfigValue);
                 return true; // Invalid date, assume we should check
             }
-            
-            var timeSinceLastCheck = DateTime.UtcNow - lastCheckTime.ToUniversalTime();
+
+            var currentTime = DateTime.UtcNow;
+            var lastCheckTimeUtc = lastCheckTime.ToUniversalTime();
+            var timeSinceLastCheck = currentTime - lastCheckTimeUtc;
             var hoursUntilNext = effectiveIntervalHours - timeSinceLastCheck.TotalHours;
-            
-            Log.Debug("Background check evaluation: Last check {LastCheck}, hours since: {HoursSince:F1}, interval: {Interval}h, hours until next: {UntilNext:F1}", 
-                lastCheckTime, timeSinceLastCheck.TotalHours, effectiveIntervalHours, hoursUntilNext);
-            
-            return hoursUntilNext <= 0; // Check is due if we've passed the interval
+
+            Log.Information("Background check evaluation: Current time: {CurrentTime}, Last check: {LastCheck} (UTC: {LastCheckUtc}), hours since: {HoursSince:F1}, interval: {Interval}h, hours until next: {UntilNext:F1}",
+                currentTime, lastCheckTime, lastCheckTimeUtc, timeSinceLastCheck.TotalHours, effectiveIntervalHours, hoursUntilNext);
+
+            var shouldRun = hoursUntilNext <= 0;
+            Log.Information("Should run background check: {ShouldRun}", shouldRun);
+
+            return shouldRun; // Check is due if we've passed the interval
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "Error determining if background check should run");
+            Log.Error(ex, "Error determining if background check should run, returning false");
             return false; // Don't run on error
         }
     }
 
     public void Dispose()
     {
+        Log.Information("Disposing MediaIntegrityService - cancelling background scheduler");
         _cancellationTokenSource?.Cancel();
         _cancellationTokenSource?.Dispose();
         _semaphore?.Dispose();
