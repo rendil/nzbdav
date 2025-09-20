@@ -1148,8 +1148,8 @@ public class MediaIntegrityService : IDisposable
 
             Log.Information("Checking if background integrity check should run - intervalHours: {IntervalHours}, intervalDays: {IntervalDays}", intervalHours, intervalDays);
 
-            // Use the more restrictive of the two intervals
-            var effectiveIntervalHours = Math.Max(intervalHours, intervalDays * 24);
+            // Use the less restrictive (shorter) of the two intervals for more frequent checking
+            var effectiveIntervalHours = Math.Min(intervalHours, intervalDays * 24);
 
             Log.Information("Effective interval calculated as: {EffectiveHours} hours", effectiveIntervalHours);
 
