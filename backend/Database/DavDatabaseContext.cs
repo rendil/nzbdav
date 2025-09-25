@@ -27,6 +27,8 @@ public sealed class DavDatabaseContext() : DbContext(Options.Value)
     public DbSet<QueueItem> QueueItems => Set<QueueItem>();
     public DbSet<HistoryItem> HistoryItems => Set<HistoryItem>();
     public DbSet<ConfigItem> ConfigItems => Set<ConfigItem>();
+    public DbSet<IntegrityCheckRun> IntegrityCheckRuns => Set<IntegrityCheckRun>();
+    public DbSet<IntegrityCheckFileResult> IntegrityCheckFileResults => Set<IntegrityCheckFileResult>();
 
     // tables
     protected override void OnModelCreating(ModelBuilder b)
@@ -258,6 +260,62 @@ public sealed class DavDatabaseContext() : DbContext(Options.Value)
             e.HasKey(i => i.ConfigName);
             e.Property(i => i.ConfigValue)
                 .IsRequired();
+        });
+
+        // IntegrityCheckRun
+        b.Entity<IntegrityCheckRun>(e =>
+        {
+            e.ToTable("IntegrityCheckRuns");
+            e.HasKey(i => i.RunId);
+            e.Property(i => i.RunId)
+                .IsRequired()
+                .HasMaxLength(50);
+            e.Property(i => i.StartTime)
+                .IsRequired();
+            e.Property(i => i.RunType)
+                .IsRequired();
+            e.Property(i => i.CorruptFileAction)
+                .IsRequired();
+            e.Property(i => i.ScanDirectory)
+                .HasMaxLength(500);
+            e.Property(i => i.CurrentFile)
+                .HasMaxLength(500);
+        });
+
+        // IntegrityCheckFileResult
+        b.Entity<IntegrityCheckFileResult>(e =>
+        {
+            e.ToTable("IntegrityCheckFileResults");
+            e.HasKey(i => i.Id);
+            e.Property(i => i.RunId)
+                .IsRequired()
+                .HasMaxLength(50);
+            e.Property(i => i.FileId)
+                .IsRequired()
+                .HasMaxLength(50);
+            e.Property(i => i.FilePath)
+                .IsRequired()
+                .HasMaxLength(500);
+            e.Property(i => i.FileName)
+                .IsRequired()
+                .HasMaxLength(255);
+            e.Property(i => i.Status)
+                .IsRequired();
+            e.Property(i => i.ErrorMessage)
+                .HasMaxLength(1000);
+            e.Property(i => i.ActionTaken);
+            e.Property(i => i.LastChecked)
+                .IsRequired();
+
+            // Foreign key relationship
+            e.HasOne(f => f.Run)
+                .WithMany()
+                .HasForeignKey(f => f.RunId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // Index for performance
+            e.HasIndex(i => i.RunId);
+            e.HasIndex(i => i.FileId);
         });
     }
 }

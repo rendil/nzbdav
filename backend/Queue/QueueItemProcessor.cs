@@ -96,7 +96,12 @@ public class QueueItemProcessor(
         var isAlreadyDownloaded = existingMountFolder is not null;
         if (isAlreadyDownloaded)
         {
-            Log.Information($"Nzb `{queueItem.JobName}` is a duplicate. Skipping and marking complete.");
+            Log.Information($"Nzb `{queueItem.JobName}` is a duplicate. Skipping download but still validating content.");
+            
+            // Validate video files for duplicates BEFORE marking as completed
+            await ValidateVideoContent();
+            
+            // Only mark as completed if validation passes
             await MarkQueueItemCompleted(startTime, error: null, () => existingMountFolder);
             return;
         }
@@ -149,12 +154,25 @@ public class QueueItemProcessor(
             new RarAggregator(dbClient, mountFolder).UpdateDatabase(fileProcessingResults);
             new FileAggregator(dbClient, mountFolder).UpdateDatabase(fileProcessingResults);
 
-            // validate video files found
-            if (configManager.IsEnsureImportableVideoEnabled())
-                new EnsureImportableVideoValidator(dbClient).ThrowIfValidationFails();
-
             return mountFolder;
         });
+
+        // validate video files found (after database operations are committed)
+        await ValidateVideoContent();
+    }
+
+    private async Task ValidateVideoContent()
+    {
+        if (configManager.IsEnsureImportableVideoEnabled())
+        {
+            Log.Information("Video validation is enabled, starting validation for job: {JobName}", queueItem.JobName);
+            var validator = new EnsureImportableVideoValidator(dbClient, usenetClient, configManager);
+            await validator.ThrowIfValidationFailsAsync(ct);
+        }
+        else
+        {
+            Log.Information("Video validation is disabled, skipping validation for job: {JobName}", queueItem.JobName);
+        }
     }
 
     private BaseProcessor? GetFileProcessor(NzbFile nzbFile, GetFileInfosStep.FileInfo fileinfo)

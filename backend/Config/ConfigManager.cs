@@ -135,6 +135,72 @@ public class ConfigManager
         return (configValue != null ? bool.Parse(configValue) : defaultValue);
     }
 
+    public bool IsIntegrityCheckingEnabled()
+    {
+        var configValue = StringUtil.EmptyToNull(GetConfigValue("integrity.enabled"));
+        return configValue?.ToLowerInvariant() == "true";
+    }
+
+    public bool IsScheduledIntegrityCheckingEnabled()
+    {
+        var configValue = StringUtil.EmptyToNull(GetConfigValue("integrity.scheduled_enabled"));
+        return configValue?.ToLowerInvariant() == "true";
+    }
+
+    public int GetIntegrityCheckIntervalHours()
+    {
+        if (int.TryParse(GetConfigValue("integrity.interval_hours"), out var hours))
+            return Math.Max(1, hours);
+        return 24; // Default to every 24 hours
+    }
+
+    public int GetIntegrityCheckRecheckEligibilityDays()
+    {
+        if (int.TryParse(GetConfigValue("integrity.recheck_eligibility_days"), out var days))
+            return Math.Max(1, days);
+        return 7; // Default to every 7 days
+    }
+
+    public int GetMaxFilesToCheckPerRun()
+    {
+        if (int.TryParse(GetConfigValue("integrity.max_files_per_run"), out var maxFiles))
+            return Math.Max(1, maxFiles);
+        return 100; // Default to 100 files per run
+    }
+
+    public string GetCorruptFileAction()
+    {
+        return GetConfigValue("integrity.corrupt_file_action") ?? "log";
+    }
+
+    public bool IsDirectDeletionFallbackEnabled()
+    {
+        if (bool.TryParse(GetConfigValue("integrity.direct_deletion_fallback"), out var enabled))
+            return enabled;
+        return false; // Default to disabled for safety
+    }
+
+    public bool IsMp4DeepScanEnabled()
+    {
+        if (bool.TryParse(GetConfigValue("integrity.mp4_deep_scan"), out var enabled))
+            return enabled;
+        return false; // Default to disabled for performance
+    }
+
+    public bool IsAutoMonitorEnabled()
+    {
+        if (bool.TryParse(GetConfigValue("integrity.auto_monitor"), out var enabled))
+            return enabled;
+        return false; // Default to disabled for safety
+    }
+
+    public bool IsUnmonitorValidatedFilesEnabled()
+    {
+        if (bool.TryParse(GetConfigValue("integrity.unmonitor_validated_files"), out var enabled))
+            return enabled;
+        return false; // Default to disabled for safety
+    }
+
     public class ConfigEventArgs : EventArgs
     {
         public Dictionary<string, string> ChangedConfig { get; set; } = new();
