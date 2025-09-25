@@ -1210,7 +1210,9 @@ public class MediaIntegrityService : IDisposable
                 lastCheckTime, timeSinceLastCheck.TotalHours, intervalHours, hoursUntilNext);
 
             var shouldRun = hoursUntilNext <= 0;
-            var nextCheckMinutes = (int)Math.Max(hoursUntilNext * 60, 0); // Convert to minutes and don't return negative values
+            var nextCheckMinutes = shouldRun
+                ? intervalHours * 60  // When check is due, wait the full interval for next check
+                : (int)Math.Max(hoursUntilNext * 60, 0); // When not due, wait until next check is due
 
             return (shouldRun, nextCheckMinutes);
         }
