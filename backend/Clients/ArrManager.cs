@@ -75,10 +75,12 @@ public class ArrManager : IDisposable
             if (contentType == ContentType.TvShow || contentType == ContentType.Unknown)
             {
                 // Try Sonarr instances (for TV shows and unknown content)
+                Log.Debug("Attempting to delete from {SonarrCount} configured Sonarr instances", _sonarrClients.Count);
                 foreach (var sonarrClient in _sonarrClients)
                 {
                     try
                     {
+                        Log.Debug("Trying Sonarr instance '{InstanceName}' for file deletion", sonarrClient.InstanceName);
                         var (success, episodeId) = await sonarrClient.DeleteFileAsync(filePath, ct);
                         if (success)
                         {

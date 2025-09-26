@@ -44,6 +44,8 @@ public class SonarrClient : ArrClient
                 return (false, null);
             }
 
+            Log.Debug("Retrieved {EpisodeFileCount} episode files from Sonarr instance '{InstanceName}' for path matching", episodeFiles.Length, _instanceName);
+
             // Try multiple matching strategies in order of preference
             var targetEpisodeFile = FindEpisodeFileByPath(episodeFiles, filePath);
 

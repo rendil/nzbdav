@@ -37,6 +37,7 @@ const defaultConfig = {
     "integrity.corrupt_file_action": "log",
     "integrity.direct_deletion_fallback": "false",
     "integrity.auto_monitor": "false",
+    "integrity.unmonitor_validated_files": "false",
     "integrity.mp4_deep_scan": "false",
 }
 
